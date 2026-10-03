@@ -12,10 +12,26 @@ import {
   ArrowRight,
   Copy,
   Check,
+  Menu,
+  Plus,
+  Download,
+  CheckCircle,
 } from 'lucide-react';
-import { ChatMessage, GenerationParams, StoredModel } from '../types/gguf';
+import { ChatMessage, GenerationParams, StoredModel, Conversation } from '../types/gguf';
 import { llmEngine } from '../services/llmEngine';
 import { FormattedMessage } from './FormattedMessage';
+import { ConversationDrawer } from './ConversationDrawer';
+import {
+  getAllConversations,
+  saveConversation,
+  deleteConversation,
+  clearAllConversations,
+  exportConversationAsJSON,
+  createNewConversation,
+  generateTitleFromPrompt,
+  getActiveConversationId,
+  setActiveConversationId,
+} from '../services/conversationStorage';
 
 interface Props {
   activeModel: StoredModel;
@@ -45,6 +61,11 @@ export const ChatView: React.FC<Props> = ({
   isGenerating,
   setIsGenerating,
 }) => {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [exportToast, setExportToast] = useState<string | null>(null);
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
@@ -62,6 +83,29 @@ export const ChatView: React.FC<Props> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load conversations from IndexedDB on startup
+  useEffect(() => {
+    async function loadStoredConversations() {
+      const stored = await getAllConversations();
+      if (stored.length > 0) {
+        setConversations(stored);
+        const activeId = getActiveConversationId();
+        const current = stored.find((c) => c.id === activeId) || stored[0];
+        setActiveConversation(current);
+        setActiveConversationId(current.id);
+        setMessages(current.messages);
+      } else {
+        const initial = createNewConversation(activeModel);
+        await saveConversation(initial);
+        setConversations([initial]);
+        setActiveConversation(initial);
+        setActiveConversationId(initial.id);
+        setMessages(initial.messages);
+      }
+    }
+    loadStoredConversations();
+  }, []);
 
   const handleCopyMessage = async (id: string, text: string) => {
     try {
@@ -94,9 +138,99 @@ export const ChatView: React.FC<Props> = ({
     scrollToBottom();
   }, [messages, currentStreamText]);
 
+  // + New Conversation
+  const handleNewChat = async () => {
+    const newConv = createNewConversation(activeModel);
+    await saveConversation(newConv);
+    setConversations((prev) => [newConv, ...prev]);
+    setActiveConversation(newConv);
+    setActiveConversationId(newConv.id);
+    setMessages(newConv.messages);
+    setInputText('');
+    setCurrentStreamText('');
+  };
+
+  // Select Conversation from menu
+  const handleSelectConversation = (id: string) => {
+    const conv = conversations.find((c) => c.id === id);
+    if (conv) {
+      setActiveConversation(conv);
+      setActiveConversationId(conv.id);
+      setMessages(conv.messages);
+      setInputText('');
+      setCurrentStreamText('');
+    }
+  };
+
+  // Delete Conversation
+  const handleDeleteConversation = async (id: string) => {
+    await deleteConversation(id);
+    const remaining = conversations.filter((c) => c.id !== id);
+    setConversations(remaining);
+
+    if (activeConversation?.id === id) {
+      if (remaining.length > 0) {
+        setActiveConversation(remaining[0]);
+        setActiveConversationId(remaining[0].id);
+        setMessages(remaining[0].messages);
+      } else {
+        const fresh = createNewConversation(activeModel);
+        await saveConversation(fresh);
+        setConversations([fresh]);
+        setActiveConversation(fresh);
+        setActiveConversationId(fresh.id);
+        setMessages(fresh.messages);
+      }
+    }
+  };
+
+  // Rename Conversation
+  const handleRenameConversation = async (id: string, newTitle: string) => {
+    const target = conversations.find((c) => c.id === id);
+    if (target) {
+      const updated: Conversation = { ...target, title: newTitle, updatedAt: Date.now() };
+      await saveConversation(updated);
+      setConversations((prev) => prev.map((c) => (c.id === id ? updated : c)));
+      if (activeConversation?.id === id) {
+        setActiveConversation(updated);
+      }
+    }
+  };
+
+  // Clear All Conversation History
+  const handleClearAllHistory = async () => {
+    await clearAllConversations();
+    const fresh = createNewConversation(activeModel);
+    await saveConversation(fresh);
+    setConversations([fresh]);
+    setActiveConversation(fresh);
+    setActiveConversationId(fresh.id);
+    setMessages(fresh.messages);
+  };
+
+  // Export current active chat as JSON
+  const handleExportCurrentChat = () => {
+    if (activeConversation) {
+      const currentWithMessages: Conversation = {
+        ...activeConversation,
+        messages,
+        updatedAt: Date.now(),
+      };
+      exportConversationAsJSON(currentWithMessages);
+      setExportToast(`Exported "${currentWithMessages.title}" as JSON`);
+      setTimeout(() => setExportToast(null), 3000);
+    }
+  };
+
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || isGenerating) return;
+
+    // Check if this is first user message to title the conversation
+    const hasUserMsg = messages.some((m) => m.role === 'user');
+    const updatedTitle = !hasUserMsg && activeConversation?.title === 'New Conversation'
+      ? generateTitleFromPrompt(text)
+      : activeConversation?.title || 'New Conversation';
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -111,6 +245,23 @@ export const ChatView: React.FC<Props> = ({
     setCurrentStreamText('');
     setCurrentTokSec(0);
     setIsGenerating(true);
+
+    // Save user message to IndexedDB immediately
+    if (activeConversation) {
+      const interimConv: Conversation = {
+        ...activeConversation,
+        title: updatedTitle,
+        messages: newHistory,
+        updatedAt: Date.now(),
+        modelId: activeModel.id,
+        modelName: activeModel.name,
+      };
+      setActiveConversation(interimConv);
+      saveConversation(interimConv);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === interimConv.id ? interimConv : c))
+      );
+    }
 
     let streamBuffer = '';
 
@@ -133,8 +284,27 @@ export const ChatView: React.FC<Props> = ({
           totalTimeMs: stats.elapsedMs,
           modelUsed: activeModel.name,
         };
-        setMessages((prev) => [...prev, assistantMessage]);
+
+        const finalHistory = [...newHistory, assistantMessage];
+        setMessages(finalHistory);
         setCurrentStreamText('');
+
+        // Persist complete exchange to IndexedDB
+        if (activeConversation) {
+          const finalConv: Conversation = {
+            ...activeConversation,
+            title: updatedTitle,
+            messages: finalHistory,
+            updatedAt: Date.now(),
+            modelId: activeModel.id,
+            modelName: activeModel.name,
+          };
+          setActiveConversation(finalConv);
+          saveConversation(finalConv);
+          setConversations((prev) =>
+            prev.map((c) => (c.id === finalConv.id ? finalConv : c))
+          );
+        }
       },
       onError: (err) => {
         setIsGenerating(false);
@@ -145,8 +315,19 @@ export const ChatView: React.FC<Props> = ({
           timestamp: Date.now(),
           modelUsed: activeModel.name,
         };
-        setMessages((prev) => [...prev, errorMessage]);
+        const finalHistory = [...newHistory, errorMessage];
+        setMessages(finalHistory);
         setCurrentStreamText('');
+
+        if (activeConversation) {
+          const finalConv: Conversation = {
+            ...activeConversation,
+            messages: finalHistory,
+            updatedAt: Date.now(),
+          };
+          setActiveConversation(finalConv);
+          saveConversation(finalConv);
+        }
       },
     });
   };
@@ -162,13 +343,24 @@ export const ChatView: React.FC<Props> = ({
         timestamp: Date.now(),
         modelUsed: activeModel.name,
       };
-      setMessages((prev) => [...prev, stoppedMessage]);
+      const finalHistory = [...messages, stoppedMessage];
+      setMessages(finalHistory);
       setCurrentStreamText('');
+
+      if (activeConversation) {
+        const finalConv: Conversation = {
+          ...activeConversation,
+          messages: finalHistory,
+          updatedAt: Date.now(),
+        };
+        setActiveConversation(finalConv);
+        saveConversation(finalConv);
+      }
     }
   };
 
   const handleClearChat = () => {
-    setMessages([
+    const freshMessages: ChatMessage[] = [
       {
         id: `welcome-${Date.now()}`,
         role: 'assistant',
@@ -176,7 +368,17 @@ export const ChatView: React.FC<Props> = ({
         timestamp: Date.now(),
         modelUsed: activeModel.name,
       },
-    ]);
+    ];
+    setMessages(freshMessages);
+    if (activeConversation) {
+      const updated: Conversation = {
+        ...activeConversation,
+        messages: freshMessages,
+        updatedAt: Date.now(),
+      };
+      setActiveConversation(updated);
+      saveConversation(updated);
+    }
   };
 
   // Rough estimation of context tokens used
@@ -188,50 +390,99 @@ export const ChatView: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col flex-1 h-full min-h-0 relative bg-slate-950">
-      {/* Top App Header with Model Switcher Pill */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/60 backdrop-blur-md border-b border-slate-800/80 z-20">
-        <button
-          onClick={() => setShowModelPicker(!showModelPicker)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/90 border border-slate-700/80 hover:bg-slate-700/80 transition text-left group max-w-[240px] truncate"
-        >
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-semibold text-slate-100 truncate group-hover:text-emerald-300">
-              {activeModel.name}
-            </span>
-            <span className="text-[10px] text-slate-400 truncate">
-              {activeModel.quantization} • {activeModel.parameterSize}
-            </span>
-          </div>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
-        </button>
+      {/* Slide-in Conversation History Menu Drawer */}
+      <ConversationDrawer
+        isOpen={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        conversations={conversations}
+        activeConversationId={activeConversation?.id || ''}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNewChat}
+        onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
+        onClearAll={handleClearAllHistory}
+      />
 
-        <div className="flex items-center gap-1.5">
-          {/* Privacy & Engine Badge */}
-          <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-medium">
-            <Cpu className="w-3 h-3" />
-            Local SLM (No Cloud)
-          </span>
+      {/* Top App Header with Conversation Drawer Menu Button & Model Switcher */}
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-900/60 backdrop-blur-md border-b border-slate-800/80 z-20">
+        <div className="flex items-center gap-2">
+          {/* Conversation History Drawer Button */}
+          <button
+            onClick={() => setShowDrawer(true)}
+            className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-emerald-400 border border-slate-700/60 transition shadow-sm active:scale-95 flex items-center gap-1.5 text-xs font-medium"
+            title="Open conversation history menu"
+            aria-label="Open conversation menu"
+          >
+            <Menu className="w-4 h-4 text-emerald-400" />
+            <span className="hidden xs:inline">Chats</span>
+          </button>
+
+          {/* Model Switcher Pill */}
+          <button
+            onClick={() => setShowModelPicker(!showModelPicker)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/90 border border-slate-700/80 hover:bg-slate-700/80 transition text-left group max-w-[170px] sm:max-w-[220px] truncate"
+          >
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-semibold text-slate-100 truncate group-hover:text-emerald-300">
+                {activeModel.name}
+              </span>
+              <span className="text-[10px] text-slate-400 truncate">
+                {activeModel.quantization} • {activeModel.parameterSize}
+              </span>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* + New Chat Action */}
+          <button
+            onClick={handleNewChat}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-medium transition active:scale-95 shadow-sm"
+            title="Start new conversation"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">New Chat</span>
+          </button>
+
+          {/* Export Current Conversation as JSON */}
+          <button
+            onClick={handleExportCurrentChat}
+            className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-emerald-400 border border-slate-700/60 transition"
+            title="Export this conversation as JSON"
+            aria-label="Export conversation as JSON"
+          >
+            <Download className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
+          </button>
 
           {/* Inspect model layers shortcut */}
           <button
             onClick={onOpenInspectorTab}
-            className="p-2 rounded-full text-slate-400 hover:text-emerald-400 hover:bg-slate-800/60 transition"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-slate-800/60 transition"
             title="Inspect GGUF Model Header"
           >
             <Layers className="w-4 h-4" />
           </button>
 
-          {/* Clear chat */}
+          {/* Clear current conversation chat */}
           <button
             onClick={handleClearChat}
-            className="p-2 rounded-full text-slate-400 hover:text-red-400 hover:bg-slate-800/60 transition"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-slate-800/60 transition"
             title="Clear Chat History"
           >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {/* Export feedback toast */}
+      {exportToast && (
+        <div className="px-4 py-1.5 bg-emerald-950/80 border-b border-emerald-500/30 text-[11px] text-emerald-300 flex items-center gap-2 animate-in fade-in">
+          <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="truncate">{exportToast}</span>
+        </div>
+      )}
 
       {/* Local Inference Verification Banner */}
       <div className="px-4 py-1.5 bg-emerald-950/30 border-b border-emerald-500/20 flex items-center justify-between text-[10px]">

@@ -109,6 +109,16 @@ export interface ChatMessage {
   modelUsed?: string;
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  modelId: string;
+  modelName: string;
+  messages: ChatMessage[];
+}
+
 export interface GenerationParams {
   temperature: number;
   topP: number;
