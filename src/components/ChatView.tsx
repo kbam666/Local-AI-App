@@ -63,6 +63,12 @@ export const ChatView: React.FC<Props> = ({
 }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const activeConvRef = useRef<Conversation | null>(null);
+
+  useEffect(() => {
+    activeConvRef.current = activeConversation;
+  }, [activeConversation]);
+
   const [showDrawer, setShowDrawer] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
 
@@ -226,11 +232,19 @@ export const ChatView: React.FC<Props> = ({
     const text = inputText.trim();
     if (!text || isGenerating) return;
 
+    let conv = activeConvRef.current;
+    if (!conv) {
+      conv = createNewConversation(activeModel);
+      activeConvRef.current = conv;
+      setActiveConversation(conv);
+      setActiveConversationId(conv.id);
+    }
+
     // Check if this is first user message to title the conversation
     const hasUserMsg = messages.some((m) => m.role === 'user');
-    const updatedTitle = !hasUserMsg && activeConversation?.title === 'New Conversation'
+    const updatedTitle = !hasUserMsg && conv.title === 'New Conversation'
       ? generateTitleFromPrompt(text)
-      : activeConversation?.title || 'New Conversation';
+      : conv.title || 'New Conversation';
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -246,22 +260,24 @@ export const ChatView: React.FC<Props> = ({
     setCurrentTokSec(0);
     setIsGenerating(true);
 
-    // Save user message to IndexedDB immediately
-    if (activeConversation) {
-      const interimConv: Conversation = {
-        ...activeConversation,
-        title: updatedTitle,
-        messages: newHistory,
-        updatedAt: Date.now(),
-        modelId: activeModel.id,
-        modelName: activeModel.name,
-      };
-      setActiveConversation(interimConv);
-      saveConversation(interimConv);
-      setConversations((prev) =>
-        prev.map((c) => (c.id === interimConv.id ? interimConv : c))
-      );
-    }
+    // Save prompt immediately into this same conversation in IndexedDB
+    const interimConv: Conversation = {
+      ...conv,
+      title: updatedTitle,
+      messages: newHistory,
+      updatedAt: Date.now(),
+      modelId: activeModel.id,
+      modelName: activeModel.name,
+    };
+    activeConvRef.current = interimConv;
+    setActiveConversation(interimConv);
+    saveConversation(interimConv);
+    setConversations((prev) => {
+      const exists = prev.some((c) => c.id === interimConv.id);
+      return exists
+        ? prev.map((c) => (c.id === interimConv.id ? interimConv : c))
+        : [interimConv, ...prev];
+    });
 
     let streamBuffer = '';
 
@@ -289,22 +305,25 @@ export const ChatView: React.FC<Props> = ({
         setMessages(finalHistory);
         setCurrentStreamText('');
 
-        // Persist complete exchange to IndexedDB
-        if (activeConversation) {
-          const finalConv: Conversation = {
-            ...activeConversation,
-            title: updatedTitle,
-            messages: finalHistory,
-            updatedAt: Date.now(),
-            modelId: activeModel.id,
-            modelName: activeModel.name,
-          };
-          setActiveConversation(finalConv);
-          saveConversation(finalConv);
-          setConversations((prev) =>
-            prev.map((c) => (c.id === finalConv.id ? finalConv : c))
-          );
-        }
+        // Persist complete multi-turn exchange to this EXACT same conversation in IndexedDB
+        const baseConv = activeConvRef.current || conv;
+        const finalConv: Conversation = {
+          ...baseConv,
+          title: updatedTitle,
+          messages: finalHistory,
+          updatedAt: Date.now(),
+          modelId: activeModel.id,
+          modelName: activeModel.name,
+        };
+        activeConvRef.current = finalConv;
+        setActiveConversation(finalConv);
+        saveConversation(finalConv);
+        setConversations((prev) => {
+          const exists = prev.some((c) => c.id === finalConv.id);
+          return exists
+            ? prev.map((c) => (c.id === finalConv.id ? finalConv : c))
+            : [finalConv, ...prev];
+        });
       },
       onError: (err) => {
         setIsGenerating(false);
@@ -319,15 +338,15 @@ export const ChatView: React.FC<Props> = ({
         setMessages(finalHistory);
         setCurrentStreamText('');
 
-        if (activeConversation) {
-          const finalConv: Conversation = {
-            ...activeConversation,
-            messages: finalHistory,
-            updatedAt: Date.now(),
-          };
-          setActiveConversation(finalConv);
-          saveConversation(finalConv);
-        }
+        const baseConv = activeConvRef.current || conv;
+        const finalConv: Conversation = {
+          ...baseConv,
+          messages: finalHistory,
+          updatedAt: Date.now(),
+        };
+        activeConvRef.current = finalConv;
+        setActiveConversation(finalConv);
+        saveConversation(finalConv);
       },
     });
   };
@@ -347,38 +366,23 @@ export const ChatView: React.FC<Props> = ({
       setMessages(finalHistory);
       setCurrentStreamText('');
 
-      if (activeConversation) {
+      const baseConv = activeConvRef.current;
+      if (baseConv) {
         const finalConv: Conversation = {
-          ...activeConversation,
+          ...baseConv,
           messages: finalHistory,
           updatedAt: Date.now(),
         };
+        activeConvRef.current = finalConv;
         setActiveConversation(finalConv);
         saveConversation(finalConv);
       }
     }
   };
 
-  const handleClearChat = () => {
-    const freshMessages: ChatMessage[] = [
-      {
-        id: `welcome-${Date.now()}`,
-        role: 'assistant',
-        content: `Chat cleared. Ready for your next query on **${activeModel.name}**!`,
-        timestamp: Date.now(),
-        modelUsed: activeModel.name,
-      },
-    ];
-    setMessages(freshMessages);
-    if (activeConversation) {
-      const updated: Conversation = {
-        ...activeConversation,
-        messages: freshMessages,
-        updatedAt: Date.now(),
-      };
-      setActiveConversation(updated);
-      saveConversation(updated);
-    }
+  const handleClearChat = async () => {
+    // Starting a new chat keeps previous conversations safe in history
+    await handleNewChat();
   };
 
   // Rough estimation of context tokens used
@@ -420,7 +424,7 @@ export const ChatView: React.FC<Props> = ({
           {/* Model Switcher Pill */}
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/90 border border-slate-700/80 hover:bg-slate-700/80 transition text-left group max-w-[170px] sm:max-w-[220px] truncate"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/90 border border-slate-700/80 hover:bg-slate-700/80 transition text-left group max-w-[160px] sm:max-w-[210px] truncate"
           >
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <div className="flex flex-col min-w-0">
@@ -433,6 +437,17 @@ export const ChatView: React.FC<Props> = ({
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
           </button>
+
+          {/* Active Conversation Pill */}
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/70 border border-slate-700/60 text-[11px] text-slate-300 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span className="truncate max-w-[130px] font-medium text-slate-200">
+              {activeConversation?.title || 'Current Chat'}
+            </span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900 text-emerald-400 font-mono font-semibold">
+              {messages.filter((m) => m.role === 'user').length} prompt{messages.filter((m) => m.role === 'user').length === 1 ? '' : 's'}
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">
@@ -516,17 +531,22 @@ export const ChatView: React.FC<Props> = ({
 
       {/* Context Window Bar */}
       <div className="px-4 py-1 bg-slate-900/40 border-b border-slate-800/50 flex items-center justify-between text-[10px] text-slate-400">
-        <div className="flex items-center gap-1.5">
-          <Zap className="w-3 h-3 text-amber-400" />
-          <span>Context: {totalTokensEstimated} / {params.contextLength} tokens</span>
+        <div className="flex items-center gap-1.5 truncate mr-2">
+          <Zap className="w-3 h-3 text-amber-400 shrink-0" />
+          <span className="truncate">
+            {activeConversation?.title || 'Chat'} ({messages.filter((m) => m.role === 'user').length} prompt{messages.filter((m) => m.role === 'user').length === 1 ? '' : 's'} in this conversation)
+          </span>
         </div>
-        <div className="w-24 bg-slate-800 rounded-full h-1.5 overflow-hidden">
-          <div
-            className={`h-full transition-all duration-300 ${
-              contextPct > 80 ? 'bg-red-500' : contextPct > 50 ? 'bg-amber-500' : 'bg-emerald-500'
-            }`}
-            style={{ width: `${contextPct}%` }}
-          />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span>{totalTokensEstimated} / {params.contextLength} toks</span>
+          <div className="w-16 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 ${
+                contextPct > 80 ? 'bg-red-500' : contextPct > 50 ? 'bg-amber-500' : 'bg-emerald-500'
+              }`}
+              style={{ width: `${contextPct}%` }}
+            />
+          </div>
         </div>
       </div>
 

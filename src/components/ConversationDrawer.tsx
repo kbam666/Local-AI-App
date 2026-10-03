@@ -164,9 +164,14 @@ export const ConversationDrawer: React.FC<Props> = ({
                         </button>
                       </form>
                     ) : (
-                      <span className="text-xs font-semibold truncate text-slate-100">
-                        {conv.title}
-                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-semibold truncate text-slate-100">
+                          {conv.title}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 font-medium shrink-0 border border-slate-700/60">
+                          {conv.messages.length} msg{conv.messages.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
                     )}
                   </div>
 
@@ -177,7 +182,7 @@ export const ConversationDrawer: React.FC<Props> = ({
                       <button
                         onClick={(e) => handleExportSingle(conv, e)}
                         className="p-1 rounded hover:bg-slate-700/60 text-slate-400 hover:text-emerald-400 transition"
-                        title="Export this conversation as JSON"
+                        title="Export entire conversation as JSON"
                       >
                         <Download className="w-3.5 h-3.5" />
                       </button>
@@ -201,7 +206,7 @@ export const ConversationDrawer: React.FC<Props> = ({
                             }
                           }}
                           className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition"
-                          title="Delete conversation"
+                          title="Delete entire conversation"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -217,7 +222,9 @@ export const ConversationDrawer: React.FC<Props> = ({
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 pl-5">
                   <span className="truncate max-w-[130px]">{conv.modelName}</span>
-                  <span>{new Date(conv.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span>
+                    {conv.messages.filter((m) => m.role === 'user').length} prompt{conv.messages.filter((m) => m.role === 'user').length === 1 ? '' : 's'} • {new Date(conv.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
               </div>
             );
