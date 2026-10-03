@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ChatMessage, GenerationParams, StoredModel } from '../types/gguf';
 import { llmEngine } from '../services/llmEngine';
+import { FormattedMessage } from './FormattedMessage';
 
 interface Props {
   activeModel: StoredModel;
@@ -356,13 +357,13 @@ export const ChatView: React.FC<Props> = ({
               className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-full group`}
             >
               <div
-                className={`rounded-2xl px-4 py-2.5 max-w-[88%] text-xs md:text-sm leading-relaxed shadow-md ${
+                className={`rounded-2xl px-4 py-2.5 max-w-[92%] sm:max-w-[85%] text-xs md:text-sm leading-relaxed shadow-md ${
                   isUser
                     ? 'bg-emerald-600 text-white rounded-br-none shadow-emerald-950'
                     : 'bg-slate-900 border border-slate-800/80 text-slate-100 rounded-bl-none'
                 }`}
               >
-                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                <FormattedMessage content={m.content} />
 
                 {/* Assistant stats badge */}
                 {!isUser && m.tokensGenerated !== undefined && (
@@ -417,10 +418,10 @@ export const ChatView: React.FC<Props> = ({
         {/* Live Streaming Assistant Response */}
         {isGenerating && currentStreamText && (
           <div className="flex flex-col items-start max-w-full">
-            <div className="rounded-2xl px-4 py-2.5 max-w-[88%] text-xs md:text-sm leading-relaxed bg-slate-900 border border-emerald-500/40 text-slate-100 rounded-bl-none shadow-lg">
-              <div className="whitespace-pre-wrap break-words">
-                {currentStreamText}
-                <span className="inline-block w-2 h-4 bg-emerald-400 ml-1 animate-pulse" />
+            <div className="rounded-2xl px-4 py-2.5 max-w-[92%] sm:max-w-[85%] text-xs md:text-sm leading-relaxed bg-slate-900 border border-emerald-500/40 text-slate-100 rounded-bl-none shadow-lg">
+              <div>
+                <FormattedMessage content={currentStreamText} isStreaming={true} />
+                <span className="inline-block w-2 h-3.5 bg-emerald-400 ml-1 animate-pulse align-middle" />
               </div>
               <div className="mt-2 pt-2 border-t border-slate-800 flex items-center gap-3 text-[10px] text-slate-400">
                 <span className="flex items-center gap-1 text-emerald-400 font-semibold animate-pulse">
