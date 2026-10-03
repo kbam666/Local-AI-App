@@ -235,13 +235,32 @@ export const ChatView: React.FC<Props> = ({
       {/* Local Inference Verification Banner */}
       <div className="px-4 py-1.5 bg-emerald-950/30 border-b border-emerald-500/20 flex items-center justify-between text-[10px]">
         <div className="flex items-center gap-1.5 text-emerald-300 font-medium">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span>Local SLM GGUF Inference • Offline Private Execution (Gemini: OFF)</span>
+          <span
+            className={`w-2 h-2 rounded-full ${
+              llmEngine.isRealModelLoaded()
+                ? 'bg-emerald-400 animate-pulse'
+                : 'bg-amber-400'
+            }`}
+          />
+          <span className="truncate max-w-[260px] sm:max-w-none">
+            {llmEngine.isRealModelLoaded()
+              ? `Real GGUF Model Active (llama.cpp WebAssembly)`
+              : activeModel.isEmbedded
+              ? `Starter Mode (Go to "Models" tab to download real weights)`
+              : `Loading GGUF into memory...`}
+          </span>
         </div>
-        <div className="flex items-center gap-1 text-slate-400">
+        <div className="flex items-center gap-1 text-slate-400 shrink-0">
           <span>RAM: ~{activeModel.parseResult?.ramEstimateMB || 95} MB</span>
         </div>
       </div>
+
+      {llmEngine.getModelLoadError() && (
+        <div className="px-4 py-1 bg-red-950/40 border-b border-red-500/30 text-[10px] text-red-300 flex items-center gap-1">
+          <Info className="w-3 h-3 text-red-400 shrink-0" />
+          <span className="truncate">Model load notice: {llmEngine.getModelLoadError()}</span>
+        </div>
+      )}
 
       {/* Context Window Bar */}
       <div className="px-4 py-1 bg-slate-900/40 border-b border-slate-800/50 flex items-center justify-between text-[10px] text-slate-400">

@@ -325,26 +325,13 @@ export const ModelsView: React.FC<Props> = ({
                         Installed
                       </span>
                     ) : (
-                      <div className="flex items-center gap-1.5">
-                        {/* Instant Fast Cache option (great for mobile testing without 500MB network wait) */}
-                        <button
-                          onClick={() => onStartDownload(model, true)}
-                          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-300 transition"
-                          title="Instant simulated mobile cache without cellular data"
-                        >
-                          <Sparkles className="w-3 h-3 inline mr-1 text-amber-400" />
-                          Fast Cache
-                        </button>
-
-                        {/* Real Network Download */}
-                        <button
-                          onClick={() => onStartDownload(model, false)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition shadow-sm active:scale-95"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Download
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => onStartDownload(model, false)}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition shadow-sm active:scale-95"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download GGUF
+                      </button>
                     )}
                   </div>
                 </div>
