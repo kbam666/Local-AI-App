@@ -174,3 +174,86 @@ export interface DownloadProgress {
   isPaused: boolean;
   error?: string;
 }
+
+export interface TrainingExample {
+  id: string;
+  prompt: string;
+  response: string;
+  category?: string;
+}
+
+export interface TrainingDataset {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  examples: TrainingExample[];
+  createdAt: number;
+  updatedAt: number;
+  isPreset?: boolean;
+}
+
+export interface FineTuningHyperparams {
+  rank: number; // LoRA rank r: 4, 8, 16, 32
+  alpha: number; // LoRA scaling alpha: 8, 16, 32, 64
+  learningRate: number; // e.g. 0.0003
+  epochs: number; // 1 to 10
+  batchSize: number; // 1 to 4
+  optimizer: 'AdamW' | 'SGD' | 'AdaFactor';
+  targetModules: string[]; // ['q_proj', 'v_proj', 'k_proj', 'o_proj']
+  warmupRatio: number;
+  weightDecay: number;
+}
+
+export interface TrainingStepRecord {
+  step: number;
+  epoch: number;
+  loss: number;
+  learningRate: number;
+  tokSec: number;
+}
+
+export interface TrainingTelemetry {
+  step: number;
+  totalSteps: number;
+  epoch: number;
+  totalEpochs: number;
+  currentLoss: number;
+  initialLoss: number;
+  lossHistory: TrainingStepRecord[];
+  learningRate: number;
+  tokensPerSec: number;
+  elapsedSec: number;
+  estimatedRemainingSec: number;
+  status: 'idle' | 'preparing' | 'training' | 'paused' | 'completed' | 'failed';
+  currentExamplePrompt?: string;
+  logMessages: string[];
+}
+
+export interface LoRAAdapter {
+  id: string;
+  name: string;
+  baseModelId: string;
+  baseModelName: string;
+  appliedModelId?: string;
+  appliedModelName?: string;
+  datasetName: string;
+  datasetSize: number;
+  hyperparams: FineTuningHyperparams;
+  initialLoss: number;
+  finalLoss: number;
+  createdAt: number;
+  isActive: boolean;
+  adapterSizeFormatted: string;
+  weightsMatrixSummary: {
+    rank: number;
+    alpha: number;
+    targetModules: string[];
+    parametersTrained: number;
+    matrixANorm?: number;
+    matrixBNorm?: number;
+  };
+  samplePrompt?: string;
+  sampleResponse?: string;
+  learnedInstructions?: { prompt: string; response: string; loss: number }[];
+}

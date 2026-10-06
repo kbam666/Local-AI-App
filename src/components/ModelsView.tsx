@@ -4,6 +4,7 @@ import {
   Upload,
   HardDrive,
   Cpu,
+  Brain,
   Trash2,
   CheckCircle,
   FileText,
@@ -26,6 +27,7 @@ interface Props {
   onSelectActiveModel: (model: StoredModel) => void;
   onRefreshModels: () => void;
   onInspectModel: (model: StoredModel) => void;
+  onOpenTrainTab?: (model: StoredModel) => void;
   onStartDownload: (model: CatalogModel, simulateFastMobile?: boolean) => void;
   hardwareAudit: HardwareAudit | null;
 }
@@ -36,6 +38,7 @@ export const ModelsView: React.FC<Props> = ({
   onSelectActiveModel,
   onRefreshModels,
   onInspectModel,
+  onOpenTrainTab,
   onStartDownload,
   hardwareAudit,
 }) => {
@@ -421,6 +424,21 @@ export const ModelsView: React.FC<Props> = ({
                       <Layers className="w-3 h-3 text-emerald-400" />
                       Inspect Tensors
                     </button>
+
+                    {/* Fine-Tune LoRA Button */}
+                    {onOpenTrainTab && (
+                      <button
+                        onClick={() => {
+                          onSelectActiveModel(model);
+                          onOpenTrainTab(model);
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                        title="Fine-tune model with LoRA"
+                      >
+                        <Brain className="w-3 h-3 text-emerald-400" />
+                        Fine-Tune
+                      </button>
+                    )}
 
                     {/* Delete model (except embedded) with inline confirmation */}
                     {!model.isEmbedded && (

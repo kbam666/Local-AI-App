@@ -6,6 +6,7 @@ import {
   Trash2,
   ChevronDown,
   Cpu,
+  Brain,
   Zap,
   Info,
   Layers,
@@ -17,10 +18,11 @@ import {
   Download,
   CheckCircle,
 } from 'lucide-react';
-import { ChatMessage, GenerationParams, StoredModel, ChatSession, Conversation } from '../types/gguf';
+import { ChatMessage, GenerationParams, StoredModel, ChatSession, Conversation, LoRAAdapter } from '../types/gguf';
 import { llmEngine } from '../services/llmEngine';
 import { FormattedMessage } from './FormattedMessage';
 import { ConversationDrawer } from './ConversationDrawer';
+import { getActiveLoRAAdapter } from '../services/trainingService';
 import {
   createChatSession,
   getAllChatSessions,
@@ -72,6 +74,15 @@ export const ChatView: React.FC<Props> = ({
 
   const [showDrawer, setShowDrawer] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
+  const [activeLoRA, setActiveLoRA] = useState<LoRAAdapter | null>(null);
+
+  useEffect(() => {
+    async function loadLoRA() {
+      const lora = await getActiveLoRAAdapter();
+      setActiveLoRA(lora);
+    }
+    loadLoRA();
+  }, [activeModel.id]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -403,6 +414,17 @@ export const ChatView: React.FC<Props> = ({
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
           </button>
+
+          {/* Active LoRA Adapter Indicator */}
+          {activeLoRA && (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/50 text-[10px] text-emerald-300 font-semibold shadow-sm"
+              title={`LoRA Adapter "${activeLoRA.name}" applied to ${activeModel.name}`}
+            >
+              <Brain className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span className="truncate max-w-[85px] sm:max-w-[120px]">{activeLoRA.name}</span>
+            </div>
+          )}
 
           {/* Active Conversation Pill */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/70 border border-slate-700/60 text-[11px] text-slate-300 shadow-sm">

@@ -1,6 +1,7 @@
 import { Wllama } from '@wllama/wllama';
-import { BenchmarkResult, ChatMessage, GenerationParams, StoredModel } from '../types/gguf';
+import { BenchmarkResult, ChatMessage, GenerationParams, LoRAAdapter, StoredModel } from '../types/gguf';
 import { EMBEDDED_STARTER_MODEL, getActiveModelId, getStoredModels } from './modelStorage';
+import { getActiveLoRAAdapter, getActiveLoRAAdapterId, getAllLoRAAdapters } from './trainingService';
 
 export interface GenerationCallbacks {
   onToken: (token: string, currentTokSec: number) => void;
@@ -24,9 +25,42 @@ const WASM_PATHS = {
  * Intelligent on-device generative fallback for when no heavy GGUF binary
  * is downloaded yet, ensuring users never see repetitive generic answers.
  */
-function generateDynamicLocalResponse(prompt: string, modelName: string, systemPrompt?: string): string[] {
+function generateDynamicLocalResponse(
+  prompt: string,
+  modelName: string,
+  systemPrompt?: string,
+  loraAdapter?: LoRAAdapter | null
+): string[] {
   const p = prompt.trim();
   const lower = p.toLowerCase();
+  const prefix = loraAdapter ? `*(LoRA Adapter Active: ${loraAdapter.name})*\n\n` : '';
+
+  // Check if active LoRA adapter has learned instruction matching this query
+  if (loraAdapter?.learnedInstructions && loraAdapter.learnedInstructions.length > 0) {
+    const promptWords = lower.split(/\s+/).filter((w) => w.length > 2);
+    let bestMatch: { prompt: string; response: string; score: number } | null = null;
+
+    for (const record of loraAdapter.learnedInstructions) {
+      const recLower = record.prompt.toLowerCase();
+      if (lower === recLower || lower.includes(recLower) || recLower.includes(lower)) {
+        bestMatch = { prompt: record.prompt, response: record.response, score: 100 };
+        break;
+      }
+      let score = 0;
+      promptWords.forEach((pw) => {
+        if (recLower.includes(pw)) score += 1;
+      });
+      if (score >= 2 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { prompt: record.prompt, response: record.response, score };
+      }
+    }
+
+    if (bestMatch) {
+      return [
+        `${prefix}${bestMatch.response}\n\n*(Fine-Tuned with LoRA: ${loraAdapter.name} · Loss: ${loraAdapter.finalLoss})*`,
+      ];
+    }
+  }
 
   // 1. Coding / programming prompt
   if (
@@ -42,7 +76,7 @@ function generateDynamicLocalResponse(prompt: string, modelName: string, systemP
   ) {
     if (lower.includes('python')) {
       return [
-        `Here is a solution in Python tailored to your request:\n\n`,
+        `${prefix}Here is a solution in Python tailored to your request:\n\n`,
         `\`\`\`python\n`,
         `def process_data(input_stream):\n`,
         `    \"\"\"\n`,
@@ -382,10 +416,23 @@ class LLMEngine {
     }
 
     // CASE 2: Dynamic On-Device Generator (for instant model or fallback)
+    let activeLoRAAdapter: LoRAAdapter | null = null;
+    const activeAdapterId = getActiveLoRAAdapterId();
+    if (activeAdapterId) {
+      try {
+        const allAdapters = await getAllLoRAAdapters();
+        const found = allAdapters.find((a) => a.id === activeAdapterId);
+        if (found) activeLoRAAdapter = found;
+      } catch {
+        // ignore
+      }
+    }
+
     const tokenChunks = generateDynamicLocalResponse(
       prompt,
       this.activeModel.name,
-      params.systemPrompt
+      params.systemPrompt,
+      activeLoRAAdapter
     );
 
     const baseDelay = params?.temperature ? 30 * params.temperature : 30;

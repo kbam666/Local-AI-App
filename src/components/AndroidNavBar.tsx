@@ -1,7 +1,7 @@
 import React from 'react';
-import { MessageSquare, Cpu, Search, Gauge, Settings } from 'lucide-react';
+import { MessageSquare, Cpu, Brain, Search, Gauge, Settings } from 'lucide-react';
 
-export type NavTab = 'chat' | 'models' | 'inspector' | 'benchmark' | 'settings';
+export type NavTab = 'chat' | 'models' | 'train' | 'inspector' | 'benchmark' | 'settings';
 
 interface Props {
   activeTab: NavTab;
@@ -13,8 +13,9 @@ export const AndroidNavBar: React.FC<Props> = ({ activeTab, onChangeTab, modelsC
   const tabs = [
     { id: 'chat' as NavTab, label: 'Chat', icon: MessageSquare },
     { id: 'models' as NavTab, label: 'Models', icon: Cpu, badge: modelsCount },
-    { id: 'inspector' as NavTab, label: 'Inspector', icon: Search },
-    { id: 'benchmark' as NavTab, label: 'Benchmark', icon: Gauge },
+    { id: 'train' as NavTab, label: 'Fine-Tune', icon: Brain },
+    { id: 'inspector' as NavTab, label: 'GGUF', icon: Search },
+    { id: 'benchmark' as NavTab, label: 'Bench', icon: Gauge },
     { id: 'settings' as NavTab, label: 'Config', icon: Settings },
   ];
 

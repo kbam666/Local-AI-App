@@ -5,6 +5,7 @@ import { AndroidNavBar, NavTab } from './components/AndroidNavBar';
 import { ChatView } from './components/ChatView';
 import { ModelsView } from './components/ModelsView';
 import { InspectorView } from './components/InspectorView';
+import { TrainingView } from './components/TrainingView';
 import { BenchmarkView } from './components/BenchmarkView';
 import { SettingsView } from './components/SettingsView';
 import { ModelDownloadModal } from './components/ModelDownloadModal';
@@ -175,8 +176,21 @@ export default function App() {
             onSelectActiveModel={handleSelectModel}
             onRefreshModels={refreshModels}
             onInspectModel={handleInspectModel}
+            onOpenTrainTab={(model) => {
+              handleSelectModel(model);
+              setActiveTab('train');
+            }}
             onStartDownload={handleStartDownload}
             hardwareAudit={hardwareAudit}
+          />
+        )}
+
+        {activeTab === 'train' && (
+          <TrainingView
+            activeModel={activeModel}
+            models={models}
+            onSelectActiveModel={handleSelectModel}
+            onOpenChatWithAdapter={() => setActiveTab('chat')}
           />
         )}
 
