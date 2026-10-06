@@ -4,16 +4,50 @@
     <meta charset="UTF-8" />
     <script>
       // In the AI Studio preview environment, HMR WebSockets are disabled by design.
-      // Filter out the harmless Vite WebSocket closing notice from console.error.
       (function() {
+        // 1. Intercept Vite HMR WebSocket to prevent failed connection attempts in iframe proxy
+        if (typeof window !== 'undefined' && window.WebSocket) {
+          var OrigWebSocket = window.WebSocket;
+          window.WebSocket = function(url, protocols) {
+            var isViteHmr = false;
+            if (protocols === 'vite-hmr') isViteHmr = true;
+            if (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1) isViteHmr = true;
+            if (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('/@vite') !== -1)) isViteHmr = true;
+
+            if (isViteHmr) {
+              var dummy = new EventTarget();
+              dummy.binaryType = 'blob';
+              dummy.readyState = 1; // WebSocket.OPEN
+              dummy.url = String(url);
+              dummy.protocol = 'vite-hmr';
+              dummy.extensions = '';
+              dummy.bufferedAmount = 0;
+              dummy.send = function() {};
+              dummy.close = function() {};
+              return dummy;
+            }
+            return new OrigWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = OrigWebSocket.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+        }
+
+        // 2. Filter out harmless Vite WebSocket closing notices from console.error across all arguments
         var origError = console.error;
         console.error = function() {
           var args = Array.prototype.slice.call(arguments);
-          if (args.length > 0) {
-            var msg = args[0] instanceof Error ? args[0].message : String(args[0]);
-            if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('WebSocket') !== -1 && msg.indexOf('closed') !== -1) {
-              return;
-            }
+          var hasHmrNotice = args.some(function(arg) {
+            if (!arg) return false;
+            var text = (arg instanceof Error ? (arg.message + ' ' + (arg.stack || '')) : String(arg)).toLowerCase();
+            return text.indexOf('websocket closed without opened') !== -1 ||
+                   (text.indexOf('websocket') !== -1 && text.indexOf('closed') !== -1) ||
+                   text.indexOf('vite-hmr') !== -1;
+          });
+          if (hasHmrNotice) {
+            return;
           }
           origError.apply(console, args);
         };
