@@ -30,11 +30,13 @@ export const BenchmarkView: React.FC<Props> = ({ activeModel, hardwareAudit, par
   const [progressTokens, setProgressTokens] = useState(0);
   const [lastResult, setLastResult] = useState<BenchmarkResult | null>(null);
   const [benchmarkHistory, setBenchmarkHistory] = useState<BenchmarkResult[]>([]);
+  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
 
   const handleStartBenchmark = () => {
     setIsRunning(true);
     setProgressTokens(0);
     setCurrentTokSec(0);
+    setBenchmarkError(null);
 
     llmEngine.runBenchmark(targetTokens, params, {
       onProgress: (tokensGenerated, target, tokSec) => {
@@ -48,7 +50,7 @@ export const BenchmarkView: React.FC<Props> = ({ activeModel, hardwareAudit, par
       },
       onError: (err) => {
         setIsRunning(false);
-        alert(`Benchmark error: ${err}`);
+        setBenchmarkError(`Benchmark notice: ${err}`);
       },
     });
   };
@@ -67,6 +69,13 @@ export const BenchmarkView: React.FC<Props> = ({ activeModel, hardwareAudit, par
           <p className="text-xs text-slate-400">Android device capability & LLM token speed test</p>
         </div>
       </div>
+
+      {benchmarkError && (
+        <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+          <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+          <span>{benchmarkError}</span>
+        </div>
+      )}
 
       {/* Hardware Audit Grid */}
       <div className="grid grid-cols-2 gap-2.5">

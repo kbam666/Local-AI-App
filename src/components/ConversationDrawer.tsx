@@ -177,9 +177,14 @@ export const ConversationDrawer: React.FC<Props> = ({
 
                   {/* Actions on conversation */}
                   {!isEditing && (
-                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition">
+                    <div
+                      className="flex items-center gap-1 shrink-0 opacity-90 transition"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
                       {/* Export JSON */}
                       <button
+                        type="button"
                         onClick={(e) => handleExportSingle(conv, e)}
                         className="p-1 rounded hover:bg-slate-700/60 text-slate-400 hover:text-emerald-400 transition"
                         title="Export entire conversation as JSON"
@@ -189,6 +194,7 @@ export const ConversationDrawer: React.FC<Props> = ({
 
                       {/* Rename */}
                       <button
+                        type="button"
                         onClick={(e) => handleStartRename(conv, e)}
                         className="p-1 rounded hover:bg-slate-700/60 text-slate-400 hover:text-slate-200 transition"
                         title="Rename conversation"
@@ -196,21 +202,23 @@ export const ConversationDrawer: React.FC<Props> = ({
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* Delete */}
-                      {conversations.length > 1 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`Delete conversation "${conv.title}"?`)) {
-                              onDeleteConversation(conv.id);
-                            }
-                          }}
-                          className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition"
-                          title="Delete entire conversation"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      {/* Direct Delete Conversation Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteConversation(conv.id);
+                        }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 active:scale-95 transition"
+                        title="Delete conversation"
+                        aria-label={`Delete conversation ${conv.title}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   )}
                 </div>

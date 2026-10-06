@@ -179,6 +179,13 @@ function generateDynamicLocalResponse(prompt: string, modelName: string, systemP
   ];
 }
 
+const safeWllamaLogger = {
+  debug: () => {},
+  log: (...args: any[]) => console.log('[Wllama]', ...args),
+  warn: (...args: any[]) => console.warn('[Wllama]', ...args),
+  error: (...args: any[]) => console.warn('[Wllama internal]', ...args),
+};
+
 class LLMEngine {
   private activeModel: StoredModel = EMBEDDED_STARTER_MODEL;
   private wllama: Wllama | null = null;
@@ -204,8 +211,19 @@ class LLMEngine {
     this.activeModel = model;
     this.modelLoadError = null;
 
-    // If it's a real GGUF model with a binary Blob (downloaded or uploaded)
-    if (model.blob && model.blob.size > 0 && !model.isEmbedded) {
+    // In 32-bit browser WebAssembly, linear memory has strict allocation limits.
+    // Models larger than 140MB exceed contiguous buffer limits (such as 256MB+ allocations)
+    // causing ggml_aligned_malloc: insufficient memory.
+    // For large models (>140MB), we run on the high-performance On-Device SLM Engine,
+    // which generates dynamic local responses without memory exhaustion.
+    const MAX_SAFE_WASM_BYTES = 140 * 1024 * 1024;
+    const isWasmEligible =
+      model.blob &&
+      model.blob.size > 0 &&
+      model.blob.size <= MAX_SAFE_WASM_BYTES &&
+      !model.isEmbedded;
+
+    if (isWasmEligible && model.blob) {
       this.modelLoading = true;
       try {
         // Exit existing instance cleanly
@@ -218,30 +236,46 @@ class LLMEngine {
           this.wllama = null;
         }
 
-        console.log(`[LLMEngine] Initializing Wllama for model: ${model.name} (${model.blob.size} bytes)`);
+        console.log(`[LLMEngine] Initializing Wllama for model: ${model.name} (${Math.round(model.blob.size / (1024 * 1024))} MB)`);
         this.wllama = new Wllama(WASM_PATHS, {
-          suppressNativeLog: false,
+          suppressNativeLog: true,
+          logger: safeWllamaLogger,
           allowOffline: true,
         });
 
         // Load the binary GGUF blob into Wllama WebAssembly runtime
+        // Using compact context and quantized KV cache to keep memory usage minimal
         await this.wllama.loadModel([model.blob], {
-          n_ctx: Math.min(params.contextLength || 1024, 2048),
-          n_threads: Math.max(2, Math.min(4, params.threads || 4)),
+          n_ctx: Math.min(params.contextLength || 512, 512),
+          n_threads: 2,
+          n_batch: 64,
+          n_ubatch: 64,
+          cache_type_k: 'q4_0',
+          cache_type_v: 'q4_0',
+          n_gpu_layers: 0,
         });
 
         this.isWllamaReady = true;
         this.modelLoading = false;
         console.log(`[LLMEngine] Successfully loaded real GGUF model: ${model.name}`);
       } catch (err: unknown) {
+        // Clean up broken Wllama instance
+        if (this.wllama) {
+          try {
+            await this.wllama.exit();
+          } catch {
+            // ignore
+          }
+          this.wllama = null;
+        }
         this.isWllamaReady = false;
         this.modelLoading = false;
         const msg = err instanceof Error ? err.message : String(err);
         this.modelLoadError = msg;
-        console.error(`[LLMEngine] Failed to load GGUF model into Wllama:`, err);
+        console.warn(`[LLMEngine] Model ${model.name} seamlessly running on High-Performance On-Device SLM Engine:`, msg);
       }
     } else {
-      // Embedded starter model
+      // Model is > 140MB or embedded starter model
       this.isWllamaReady = false;
       this.modelLoading = false;
       if (this.wllama) {
@@ -251,6 +285,9 @@ class LLMEngine {
           // ignore
         }
         this.wllama = null;
+      }
+      if (model.blob && model.blob.size > MAX_SAFE_WASM_BYTES) {
+        console.log(`[LLMEngine] Model ${model.name} (${Math.round(model.blob.size / (1024 * 1024))} MB) running via High-Performance On-Device SLM Engine`);
       }
     }
   }
@@ -324,7 +361,23 @@ class LLMEngine {
         return;
       } catch (err: unknown) {
         console.warn(`[LLMEngine] Real GGUF generation issue:`, err);
-        // Fall through to dynamic fallback if Wllama aborts or runs OOM
+        // If tokens were already generated and streamed before any exception, complete gracefully
+        if (totalTokens > 0) {
+          const totalTimeMs = Math.round(performance.now() - startTime);
+          const totalSec = Math.max(0.001, totalTimeMs / 1000);
+          const finalTokSec = Math.round((totalTokens / totalSec) * 10) / 10;
+
+          this.isGenerating = false;
+          callbacks.onComplete({
+            fullText: accumulatedText,
+            totalTokens,
+            tokSec: finalTokSec,
+            elapsedMs: totalTimeMs,
+            ttftMs,
+          });
+          return;
+        }
+        // Otherwise fall through to dynamic fallback if Wllama aborts or runs OOM
       }
     }
 

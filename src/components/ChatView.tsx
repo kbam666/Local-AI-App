@@ -17,21 +17,22 @@ import {
   Download,
   CheckCircle,
 } from 'lucide-react';
-import { ChatMessage, GenerationParams, StoredModel, Conversation } from '../types/gguf';
+import { ChatMessage, GenerationParams, StoredModel, ChatSession, Conversation } from '../types/gguf';
 import { llmEngine } from '../services/llmEngine';
 import { FormattedMessage } from './FormattedMessage';
 import { ConversationDrawer } from './ConversationDrawer';
 import {
-  getAllConversations,
-  saveConversation,
-  deleteConversation,
-  clearAllConversations,
-  exportConversationAsJSON,
-  createNewConversation,
-  generateTitleFromPrompt,
-  getActiveConversationId,
-  setActiveConversationId,
-} from '../services/conversationStorage';
+  createChatSession,
+  getAllChatSessions,
+  getActiveChatSession,
+  deleteChatSession,
+  clearAllChatSessions,
+  saveChatSession,
+  appendMessageToActiveSession,
+  exportChatSessionAsJSON,
+  setActiveSessionId,
+  syncActiveSessionToLocalStorage,
+} from '../services/chatSessionService';
 
 interface Props {
   activeModel: StoredModel;
@@ -92,25 +93,23 @@ export const ChatView: React.FC<Props> = ({
 
   // Load conversations from IndexedDB on startup
   useEffect(() => {
-    async function loadStoredConversations() {
-      const stored = await getAllConversations();
+    async function loadStoredSessions() {
+      const stored = await getAllChatSessions();
       if (stored.length > 0) {
         setConversations(stored);
-        const activeId = getActiveConversationId();
-        const current = stored.find((c) => c.id === activeId) || stored[0];
-        setActiveConversation(current);
-        setActiveConversationId(current.id);
-        setMessages(current.messages);
+        const active = (await getActiveChatSession()) || stored[0];
+        setActiveConversation(active);
+        setActiveSessionId(active.id);
+        setMessages(active.messages);
       } else {
-        const initial = createNewConversation(activeModel);
-        await saveConversation(initial);
+        const initial = await createChatSession(activeModel);
         setConversations([initial]);
         setActiveConversation(initial);
-        setActiveConversationId(initial.id);
+        setActiveSessionId(initial.id);
         setMessages(initial.messages);
       }
     }
-    loadStoredConversations();
+    loadStoredSessions();
   }, []);
 
   const handleCopyMessage = async (id: string, text: string) => {
@@ -146,12 +145,11 @@ export const ChatView: React.FC<Props> = ({
 
   // + New Conversation
   const handleNewChat = async () => {
-    const newConv = createNewConversation(activeModel);
-    await saveConversation(newConv);
-    setConversations((prev) => [newConv, ...prev]);
-    setActiveConversation(newConv);
-    setActiveConversationId(newConv.id);
-    setMessages(newConv.messages);
+    const newSession = await createChatSession(activeModel);
+    setConversations((prev) => [newSession, ...prev]);
+    setActiveConversation(newSession);
+    setActiveSessionId(newSession.id);
+    setMessages(newSession.messages);
     setInputText('');
     setCurrentStreamText('');
   };
@@ -161,7 +159,8 @@ export const ChatView: React.FC<Props> = ({
     const conv = conversations.find((c) => c.id === id);
     if (conv) {
       setActiveConversation(conv);
-      setActiveConversationId(conv.id);
+      setActiveSessionId(conv.id);
+      syncActiveSessionToLocalStorage(conv);
       setMessages(conv.messages);
       setInputText('');
       setCurrentStreamText('');
@@ -170,23 +169,35 @@ export const ChatView: React.FC<Props> = ({
 
   // Delete Conversation
   const handleDeleteConversation = async (id: string) => {
-    await deleteConversation(id);
-    const remaining = conversations.filter((c) => c.id !== id);
-    setConversations(remaining);
-
-    if (activeConversation?.id === id) {
-      if (remaining.length > 0) {
-        setActiveConversation(remaining[0]);
-        setActiveConversationId(remaining[0].id);
-        setMessages(remaining[0].messages);
-      } else {
-        const fresh = createNewConversation(activeModel);
-        await saveConversation(fresh);
-        setConversations([fresh]);
-        setActiveConversation(fresh);
-        setActiveConversationId(fresh.id);
-        setMessages(fresh.messages);
+    // 1. Optimistic immediate state update so the UI updates instantly
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+      if (activeConversation?.id === id) {
+        if (remaining.length > 0) {
+          activeConvRef.current = remaining[0];
+          setActiveConversation(remaining[0]);
+          setActiveSessionId(remaining[0].id);
+          syncActiveSessionToLocalStorage(remaining[0]);
+          setMessages(remaining[0].messages);
+        } else {
+          createChatSession(activeModel).then((fresh) => {
+            activeConvRef.current = fresh;
+            setConversations([fresh]);
+            setActiveConversation(fresh);
+            setActiveSessionId(fresh.id);
+            syncActiveSessionToLocalStorage(fresh);
+            setMessages(fresh.messages);
+          });
+        }
       }
+      return remaining;
+    });
+
+    // 2. Perform deletion in persistent storage
+    try {
+      await deleteChatSession(id);
+    } catch (err) {
+      console.error('Failed to delete chat session from storage:', err);
     }
   };
 
@@ -194,57 +205,43 @@ export const ChatView: React.FC<Props> = ({
   const handleRenameConversation = async (id: string, newTitle: string) => {
     const target = conversations.find((c) => c.id === id);
     if (target) {
-      const updated: Conversation = { ...target, title: newTitle, updatedAt: Date.now() };
-      await saveConversation(updated);
+      const updated: ChatSession = { ...target, title: newTitle, updatedAt: Date.now() };
+      await saveChatSession(updated);
       setConversations((prev) => prev.map((c) => (c.id === id ? updated : c)));
       if (activeConversation?.id === id) {
         setActiveConversation(updated);
+        syncActiveSessionToLocalStorage(updated);
       }
     }
   };
 
   // Clear All Conversation History
   const handleClearAllHistory = async () => {
-    await clearAllConversations();
-    const fresh = createNewConversation(activeModel);
-    await saveConversation(fresh);
+    await clearAllChatSessions();
+    const fresh = await createChatSession(activeModel);
     setConversations([fresh]);
     setActiveConversation(fresh);
-    setActiveConversationId(fresh.id);
+    setActiveSessionId(fresh.id);
     setMessages(fresh.messages);
   };
 
   // Export current active chat as JSON
   const handleExportCurrentChat = () => {
     if (activeConversation) {
-      const currentWithMessages: Conversation = {
+      const currentWithMessages: ChatSession = {
         ...activeConversation,
         messages,
         updatedAt: Date.now(),
       };
-      exportConversationAsJSON(currentWithMessages);
+      exportChatSessionAsJSON(currentWithMessages);
       setExportToast(`Exported "${currentWithMessages.title}" as JSON`);
       setTimeout(() => setExportToast(null), 3000);
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = inputText.trim();
     if (!text || isGenerating) return;
-
-    let conv = activeConvRef.current;
-    if (!conv) {
-      conv = createNewConversation(activeModel);
-      activeConvRef.current = conv;
-      setActiveConversation(conv);
-      setActiveConversationId(conv.id);
-    }
-
-    // Check if this is first user message to title the conversation
-    const hasUserMsg = messages.some((m) => m.role === 'user');
-    const updatedTitle = !hasUserMsg && conv.title === 'New Conversation'
-      ? generateTitleFromPrompt(text)
-      : conv.title || 'New Conversation';
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -260,23 +257,15 @@ export const ChatView: React.FC<Props> = ({
     setCurrentTokSec(0);
     setIsGenerating(true);
 
-    // Save prompt immediately into this same conversation in IndexedDB
-    const interimConv: Conversation = {
-      ...conv,
-      title: updatedTitle,
-      messages: newHistory,
-      updatedAt: Date.now(),
-      modelId: activeModel.id,
-      modelName: activeModel.name,
-    };
-    activeConvRef.current = interimConv;
-    setActiveConversation(interimConv);
-    saveConversation(interimConv);
+    // Append to active session object in IndexedDB and localStorage immediately
+    const updatedSession = await appendMessageToActiveSession(userMessage, activeModel);
+    activeConvRef.current = updatedSession;
+    setActiveConversation(updatedSession);
     setConversations((prev) => {
-      const exists = prev.some((c) => c.id === interimConv.id);
+      const exists = prev.some((c) => c.id === updatedSession.id);
       return exists
-        ? prev.map((c) => (c.id === interimConv.id ? interimConv : c))
-        : [interimConv, ...prev];
+        ? prev.map((c) => (c.id === updatedSession.id ? updatedSession : c))
+        : [updatedSession, ...prev];
     });
 
     let streamBuffer = '';
@@ -287,7 +276,7 @@ export const ChatView: React.FC<Props> = ({
         setCurrentStreamText(streamBuffer);
         setCurrentTokSec(tokSec);
       },
-      onComplete: (stats) => {
+      onComplete: async (stats) => {
         setIsGenerating(false);
         const assistantMessage: ChatMessage = {
           id: `asst-${Date.now()}`,
@@ -305,27 +294,18 @@ export const ChatView: React.FC<Props> = ({
         setMessages(finalHistory);
         setCurrentStreamText('');
 
-        // Persist complete multi-turn exchange to this EXACT same conversation in IndexedDB
-        const baseConv = activeConvRef.current || conv;
-        const finalConv: Conversation = {
-          ...baseConv,
-          title: updatedTitle,
-          messages: finalHistory,
-          updatedAt: Date.now(),
-          modelId: activeModel.id,
-          modelName: activeModel.name,
-        };
-        activeConvRef.current = finalConv;
-        setActiveConversation(finalConv);
-        saveConversation(finalConv);
+        // Append assistant message to active session in IndexedDB and localStorage
+        const finishedSession = await appendMessageToActiveSession(assistantMessage, activeModel);
+        activeConvRef.current = finishedSession;
+        setActiveConversation(finishedSession);
         setConversations((prev) => {
-          const exists = prev.some((c) => c.id === finalConv.id);
+          const exists = prev.some((c) => c.id === finishedSession.id);
           return exists
-            ? prev.map((c) => (c.id === finalConv.id ? finalConv : c))
-            : [finalConv, ...prev];
+            ? prev.map((c) => (c.id === finishedSession.id ? finishedSession : c))
+            : [finishedSession, ...prev];
         });
       },
-      onError: (err) => {
+      onError: async (err) => {
         setIsGenerating(false);
         const errorMessage: ChatMessage = {
           id: `err-${Date.now()}`,
@@ -338,20 +318,14 @@ export const ChatView: React.FC<Props> = ({
         setMessages(finalHistory);
         setCurrentStreamText('');
 
-        const baseConv = activeConvRef.current || conv;
-        const finalConv: Conversation = {
-          ...baseConv,
-          messages: finalHistory,
-          updatedAt: Date.now(),
-        };
-        activeConvRef.current = finalConv;
-        setActiveConversation(finalConv);
-        saveConversation(finalConv);
+        const errorSession = await appendMessageToActiveSession(errorMessage, activeModel);
+        activeConvRef.current = errorSession;
+        setActiveConversation(errorSession);
       },
     });
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     llmEngine.stop();
     setIsGenerating(false);
     if (currentStreamText) {
@@ -366,17 +340,9 @@ export const ChatView: React.FC<Props> = ({
       setMessages(finalHistory);
       setCurrentStreamText('');
 
-      const baseConv = activeConvRef.current;
-      if (baseConv) {
-        const finalConv: Conversation = {
-          ...baseConv,
-          messages: finalHistory,
-          updatedAt: Date.now(),
-        };
-        activeConvRef.current = finalConv;
-        setActiveConversation(finalConv);
-        saveConversation(finalConv);
-      }
+      const stoppedSession = await appendMessageToActiveSession(stoppedMessage, activeModel);
+      activeConvRef.current = stoppedSession;
+      setActiveConversation(stoppedSession);
     }
   };
 

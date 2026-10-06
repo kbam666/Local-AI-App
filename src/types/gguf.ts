@@ -109,7 +109,7 @@ export interface ChatMessage {
   modelUsed?: string;
 }
 
-export interface Conversation {
+export interface ChatSession {
   id: string;
   title: string;
   createdAt: number;
@@ -118,6 +118,8 @@ export interface Conversation {
   modelName: string;
   messages: ChatMessage[];
 }
+
+export type Conversation = ChatSession;
 
 export interface GenerationParams {
   temperature: number;

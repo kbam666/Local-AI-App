@@ -41,11 +41,13 @@ export const ModelsView: React.FC<Props> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'installed' | 'catalog'>('catalog');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string>('All');
   const [customUrl, setCustomUrl] = useState('');
   const [customModelName, setCustomModelName] = useState('');
   const [showCustomUrlDrawer, setShowCustomUrlDrawer] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,14 +75,13 @@ export const ModelsView: React.FC<Props> = ({
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Remove "${name}" from local mobile storage?`)) {
-      try {
-        await deleteModelFromStorage(id);
-        await onRefreshModels();
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'Failed to delete model');
-      }
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteModelFromStorage(id);
+      await onRefreshModels();
+      setDeleteConfirmId(null);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to delete model');
     }
   };
 
@@ -113,12 +114,17 @@ export const ModelsView: React.FC<Props> = ({
     setCustomModelName('');
   };
 
-  const filteredCatalog = MOBILE_GGUF_CATALOG.filter(
-    (m) =>
-      m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.architecture.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.quantization.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCatalog = MOBILE_GGUF_CATALOG.filter((m) => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      m.name.toLowerCase().includes(q) ||
+      m.architecture.toLowerCase().includes(q) ||
+      m.quantization.toLowerCase().includes(q) ||
+      m.description.toLowerCase().includes(q) ||
+      m.parameters.toLowerCase().includes(q);
+    const matchesTag = selectedTag === 'All' || m.tag === selectedTag;
+    return matchesSearch && matchesTag;
+  });
 
   const storageEst = hardwareAudit?.storageEstimate;
 
@@ -233,6 +239,23 @@ export const ModelsView: React.FC<Props> = ({
             </button>
           </div>
 
+          {/* Tag Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            {['All', 'Recommended', 'Ultra-Light', 'Reasoning', 'Coding', 'Fast'].map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(tag)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition whitespace-nowrap ${
+                  selectedTag === tag
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                    : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {tag} {tag === 'All' ? `(${MOBILE_GGUF_CATALOG.length})` : ''}
+              </button>
+            ))}
+          </div>
+
           {/* Custom URL Drawer */}
           {showCustomUrlDrawer && (
             <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-700/80 space-y-2 animate-in fade-in">
@@ -295,6 +318,10 @@ export const ModelsView: React.FC<Props> = ({
                               ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                               : model.tag === 'Recommended'
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : model.tag === 'Coding'
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : model.tag === 'Fast'
+                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
                               : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                           }`}
                         >
@@ -395,15 +422,36 @@ export const ModelsView: React.FC<Props> = ({
                       Inspect Tensors
                     </button>
 
-                    {/* Delete model (except embedded) */}
+                    {/* Delete model (except embedded) with inline confirmation */}
                     {!model.isEmbedded && (
-                      <button
-                        onClick={() => handleDelete(model.id, model.name)}
-                        className="p-1.5 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition"
-                        title="Delete from storage"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      deleteConfirmId === model.id ? (
+                        <div className="flex items-center gap-1 bg-red-950/95 border border-red-500/60 rounded-lg px-2 py-0.5 animate-in fade-in">
+                          <span className="text-[10px] text-red-300 font-semibold">Delete?</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(model.id)}
+                            className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 text-[10px] font-bold text-white transition active:scale-95 shadow-sm"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmId(null)}
+                            className="px-1 py-0.5 rounded hover:bg-slate-800 text-[10px] text-slate-400 hover:text-slate-200 transition"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmId(model.id)}
+                          className="p-1.5 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition"
+                          title="Delete from storage"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )
                     )}
                   </div>
 

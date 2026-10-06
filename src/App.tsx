@@ -32,7 +32,7 @@ const DEFAULT_PARAMS: GenerationParams = {
   repeatPenalty: 1.1,
   systemPrompt: 'You are DroidLLM, a helpful, precise AI assistant running locally and privately on an Android device.',
   threads: 4,
-  useWebGPU: true,
+  useWebGPU: false,
   contextLength: 2048,
 };
 
@@ -46,6 +46,7 @@ export default function App() {
   const [hardwareAudit, setHardwareAudit] = useState<HardwareAudit | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [activeDownloadModelId, setActiveDownloadModelId] = useState<string | null>(null);
+  const [downloadErrorToast, setDownloadErrorToast] = useState<string | null>(null);
 
   // Load models & hardware audit on mount
   useEffect(() => {
@@ -126,7 +127,8 @@ export default function App() {
       setActiveDownloadModelId(null);
       const errMsg = err instanceof Error ? err.message : String(err);
       if (!errMsg.includes('cancelled')) {
-        alert(`Download failed: ${errMsg}`);
+        setDownloadErrorToast(`Download notice: ${errMsg}`);
+        setTimeout(() => setDownloadErrorToast(null), 4000);
       }
     }
   };
@@ -198,6 +200,19 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Download Error Notice Toast */}
+      {downloadErrorToast && (
+        <div className="absolute top-12 left-4 right-4 z-50 bg-slate-900 border border-amber-500/50 text-amber-200 text-xs px-3.5 py-2.5 rounded-2xl shadow-xl flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+          <span className="truncate pr-2">{downloadErrorToast}</span>
+          <button
+            onClick={() => setDownloadErrorToast(null)}
+            className="text-slate-400 hover:text-white text-xs font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Download Progress Modal Drawer */}
       <ModelDownloadModal
