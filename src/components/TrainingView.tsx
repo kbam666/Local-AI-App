@@ -54,6 +54,7 @@ import {
   parseUploadedDatasetFile,
   parseRawDatasetInput,
 } from '../services/trainingService';
+import { VisualTrainingLogs } from './VisualTrainingLogs';
 
 interface Props {
   activeModel: StoredModel;
@@ -116,7 +117,6 @@ export const TrainingView: React.FC<Props> = ({
   const [isEvaluating, setIsEvaluating] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Keep selected training model synced
   useEffect(() => {
@@ -142,10 +142,6 @@ export const TrainingView: React.FC<Props> = ({
     }
     loadData();
   }, []);
-
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [telemetry?.logMessages]);
 
   const refreshAdapters = async () => {
     const list = await getAllLoRAAdapters();
@@ -719,121 +715,18 @@ export const TrainingView: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Live Training Telemetry & Real Loss Curves */}
-          {telemetry && (
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-4 animate-in fade-in">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                  <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
-                  Real Token Training Telemetry
-                </span>
-                <span className="text-xs font-mono text-emerald-400 font-bold">
-                  {telemetry.status === 'completed' ? 'Converged' : `Epoch ${telemetry.epoch}/${telemetry.totalEpochs}`}
-                </span>
-              </div>
-
-              {/* Progress bar */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs text-slate-300">
-                  <span>Step {telemetry.step} / {telemetry.totalSteps}</span>
-                  <span className="font-mono text-emerald-400 font-bold">
-                    {Math.round((telemetry.step / telemetry.totalSteps) * 100)}%
-                  </span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-150"
-                    style={{ width: `${Math.round((telemetry.step / telemetry.totalSteps) * 100)}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Key Metrics Grid */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block">Cross-Entropy Loss</span>
-                  <span className="text-sm font-bold font-mono text-emerald-400">
-                    {telemetry.currentLoss.toFixed(4)}
-                  </span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block">Loss Reduction</span>
-                  <span className="text-sm font-bold font-mono text-teal-300 flex items-center justify-center gap-0.5">
-                    <TrendingDown className="w-3.5 h-3.5" />
-                    {Math.max(0, Math.round(((telemetry.initialLoss - telemetry.currentLoss) / telemetry.initialLoss) * 100))}%
-                  </span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] text-slate-400 block">Token Speed</span>
-                  <span className="text-sm font-bold font-mono text-slate-200">
-                    {telemetry.tokensPerSec} tok/s
-                  </span>
-                </div>
-              </div>
-
-              {/* Loss Curve Visualizer (SVG Sparkline) */}
-              {telemetry.lossHistory.length > 1 && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                  <div className="flex justify-between text-[11px] text-slate-400">
-                    <span>Loss Curve (Perplexity)</span>
-                    <span className="font-mono text-slate-300">Start: {telemetry.initialLoss.toFixed(3)} → Final: {telemetry.currentLoss.toFixed(3)}</span>
-                  </div>
-                  <div className="w-full h-24 bg-slate-950 rounded-xl border border-slate-800 p-2 flex items-end">
-                    <svg className="w-full h-full overflow-visible" viewBox="0 0 100 50" preserveAspectRatio="none">
-                      <polyline
-                        fill="none"
-                        stroke="#10b981"
-                        strokeWidth="2.5"
-                        points={telemetry.lossHistory
-                          .map((rec, idx) => {
-                            const x = (idx / Math.max(1, telemetry.lossHistory.length - 1)) * 100;
-                            const maxL = telemetry.initialLoss * 1.05;
-                            const minL = 0.35;
-                            const normY = Math.max(0, Math.min(1, (rec.loss - minL) / (maxL - minL)));
-                            const y = 48 - normY * 44;
-                            return `${x},${y}`;
-                          })
-                          .join(' ')}
-                      />
-                    </svg>
-                  </div>
-                </div>
-              )}
-
-              {/* Terminal Logs */}
-              <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
-                  <Terminal className="w-3 h-3 text-slate-500" />
-                  Live Fine-Tuning Terminal
-                </span>
-                <div className="w-full h-28 bg-slate-950 border border-slate-800 rounded-xl p-2.5 font-mono text-[10px] text-slate-300 overflow-y-auto space-y-1">
-                  {telemetry.logMessages.map((msg, i) => (
-                    <div key={i} className="leading-tight">
-                      <span className="text-emerald-500 mr-1.5">›</span>
-                      {msg}
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              </div>
-
-              {telemetry.status === 'completed' && lastTrainedAdapter && (
-                <div className="pt-2 flex items-center justify-between">
-                  <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" />
-                    Adapter Trained & Attached ({lastTrainedAdapter.name})
-                  </span>
-                  <button
-                    onClick={() => setActiveSubTab('adapters')}
-                    className="flex items-center gap-1 px-3 py-1 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold transition active:scale-95"
-                  >
-                    View Adapters
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Visual Training Logs, Real-Time Loss Metrics & Epoch Progress Component */}
+          <VisualTrainingLogs
+            telemetry={telemetry}
+            isTraining={isTraining}
+            isPaused={isPaused}
+            hyperparams={hyperparams}
+            modelName={currentTrainingModel.name}
+            datasetName={viewingDataset?.name || 'Fine-Tuning Dataset'}
+            lastTrainedAdapter={lastTrainedAdapter}
+            onOpenAdaptersTab={() => setActiveSubTab('adapters')}
+            onOpenTestBench={() => setActiveSubTab('eval')}
+          />
         </div>
       )}
 

@@ -9,6 +9,7 @@ import { TrainingView } from './components/TrainingView';
 import { BenchmarkView } from './components/BenchmarkView';
 import { SettingsView } from './components/SettingsView';
 import { ModelDownloadModal } from './components/ModelDownloadModal';
+import { TermuxHubModal } from './components/TermuxHubModal';
 import {
   CatalogModel,
   DownloadProgress,
@@ -48,6 +49,7 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [activeDownloadModelId, setActiveDownloadModelId] = useState<string | null>(null);
   const [downloadErrorToast, setDownloadErrorToast] = useState<string | null>(null);
+  const [showTermuxModal, setShowTermuxModal] = useState(false);
 
   // Load models & hardware audit on mount
   useEffect(() => {
@@ -211,9 +213,16 @@ export default function App() {
             params={params}
             onChangeParams={setParams}
             hardwareAudit={hardwareAudit}
+            onOpenTermuxHub={() => setShowTermuxModal(true)}
           />
         )}
       </main>
+
+      {/* Termux Local Server Hub & Code Runner Modal */}
+      <TermuxHubModal
+        isOpen={showTermuxModal}
+        onClose={() => setShowTermuxModal(false)}
+      />
 
       {/* Download Error Notice Toast */}
       {downloadErrorToast && (
