@@ -2,6 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // In the AI Studio preview environment, HMR WebSockets are disabled by design.
+      // Filter out the harmless Vite WebSocket closing notice from console.error.
+      (function() {
+        var origError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          if (args.length > 0) {
+            var msg = args[0] instanceof Error ? args[0].message : String(args[0]);
+            if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('WebSocket') !== -1 && msg.indexOf('closed') !== -1) {
+              return;
+            }
+          }
+          origError.apply(console, args);
+        };
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>DroidLLM - Local GGUF Runner</title>
     <meta name="description" content="Android app for downloading, managing, and running quantized GGUF models directly on mobile devices with local on-device LLM inference." />
