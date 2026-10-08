@@ -193,6 +193,23 @@ export interface TrainingDataset {
   createdAt: number;
   updatedAt: number;
   isPreset?: boolean;
+  source?: 'preset' | 'custom' | 'huggingface' | 'openrouter';
+  hfDatasetId?: string;
+  downloads?: number;
+  likes?: number;
+}
+
+export interface HuggingFaceDatasetMeta {
+  id: string;
+  name?: string;
+  author?: string;
+  description?: string;
+  downloads?: number;
+  likes?: number;
+  tags?: string[];
+  lastModified?: string;
+  isInstructionTuning?: boolean;
+  sampleCount?: number;
 }
 
 export interface FineTuningHyperparams {

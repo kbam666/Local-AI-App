@@ -65,6 +65,7 @@ import {
   getTeacherEvaluation,
   getOpenRouterStatus,
 } from '../services/openRouterService';
+import { HuggingFaceDatasetExplorer } from './HuggingFaceDatasetExplorer';
 import { VisualTrainingLogs } from './VisualTrainingLogs';
 
 interface Props {
@@ -80,7 +81,7 @@ export const TrainingView: React.FC<Props> = ({
   onSelectActiveModel,
   onOpenChatWithAdapter,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'datasets' | 'train' | 'teacher' | 'adapters' | 'eval'>('train');
+  const [activeSubTab, setActiveSubTab] = useState<'datasets' | 'train' | 'huggingface' | 'teacher' | 'adapters' | 'eval'>('train');
 
   // Selected training model
   const [selectedTrainingModelId, setSelectedTrainingModelId] = useState<string>(activeModel.id);
@@ -112,7 +113,7 @@ export const TrainingView: React.FC<Props> = ({
 
   // Dataset Creation / Import Modal
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importMode, setImportMode] = useState<'upload' | 'paste' | 'manual'>('upload');
+  const [importMode, setImportMode] = useState<'upload' | 'paste' | 'manual' | 'huggingface'>('upload');
   const [newDatasetName, setNewDatasetName] = useState('');
   const [newDatasetCategory, setNewDatasetCategory] = useState('Custom');
   const [pastedRawText, setPastedRawText] = useState('');
@@ -621,6 +622,17 @@ export const TrainingView: React.FC<Props> = ({
           Datasets ({datasets.length})
         </button>
         <button
+          onClick={() => setActiveSubTab('huggingface')}
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap flex items-center gap-1.5 ${
+            activeSubTab === 'huggingface'
+              ? 'bg-amber-950/80 border border-amber-500/50 text-amber-300 shadow-sm'
+              : 'text-amber-400/90 hover:text-amber-300'
+          }`}
+        >
+          <span className="text-sm leading-none" role="img" aria-label="hf">🤗</span>
+          Hugging Face Hub
+        </button>
+        <button
           onClick={() => setActiveSubTab('teacher')}
           className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap flex items-center gap-1 ${
             activeSubTab === 'teacher'
@@ -665,16 +677,26 @@ export const TrainingView: React.FC<Props> = ({
                 <Database className="w-4 h-4 text-emerald-400" />
                 Select Fine-Tuning Dataset
               </span>
-              <button
-                onClick={() => {
-                  setActiveSubTab('datasets');
-                  setShowImportModal(true);
-                }}
-                className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-                Add Dataset
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setActiveSubTab('huggingface')}
+                  className="text-[11px] text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                  title="Search & Download Hugging Face datasets"
+                >
+                  <span role="img" aria-label="hf">🤗</span>
+                  Hugging Face
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveSubTab('datasets');
+                    setShowImportModal(true);
+                  }}
+                  className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add Custom
+                </button>
+              </div>
             </div>
 
             <select
@@ -685,7 +707,7 @@ export const TrainingView: React.FC<Props> = ({
             >
               {datasets.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name} ({d.examples.length} instruction pairs · {d.category})
+                  {d.source === 'huggingface' ? '🤗 ' : ''}{d.name} ({d.examples.length} instruction pairs · {d.category})
                 </option>
               ))}
             </select>
@@ -693,7 +715,10 @@ export const TrainingView: React.FC<Props> = ({
             {viewingDataset && (
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>{viewingDataset.examples.length} instruction examples loaded</span>
-                <span>Category: {viewingDataset.category}</span>
+                <span className="flex items-center gap-1">
+                  {viewingDataset.source === 'huggingface' && <span role="img" aria-label="hf">🤗</span>}
+                  Category: <strong className="text-slate-300">{viewingDataset.category}</strong>
+                </span>
               </div>
             )}
           </div>
@@ -848,6 +873,14 @@ export const TrainingView: React.FC<Props> = ({
             </span>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setActiveSubTab('huggingface')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-950/80 border border-amber-500/50 hover:bg-amber-900/80 text-amber-300 text-xs font-semibold transition active:scale-95 shadow-sm"
+                title="Search and download datasets from Hugging Face Hub"
+              >
+                <span className="text-sm leading-none" role="img" aria-label="hf">🤗</span>
+                Search Hugging Face
+              </button>
+              <button
                 onClick={() => setActiveSubTab('teacher')}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-950/80 border border-indigo-500/50 hover:bg-indigo-900/80 text-indigo-300 text-xs font-semibold transition active:scale-95 shadow-sm"
                 title="Synthesize custom datasets with OpenRouter AI Teacher"
@@ -893,7 +926,7 @@ export const TrainingView: React.FC<Props> = ({
                     importMode === 'upload' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400'
                   }`}
                 >
-                  Upload File (.jsonl/.json)
+                  Upload File
                 </button>
                 <button
                   type="button"
@@ -902,7 +935,7 @@ export const TrainingView: React.FC<Props> = ({
                     importMode === 'paste' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400'
                   }`}
                 >
-                  Paste JSONL / Text
+                  Paste JSONL
                 </button>
                 <button
                   type="button"
@@ -912,6 +945,15 @@ export const TrainingView: React.FC<Props> = ({
                   }`}
                 >
                   Manual Builder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMode('huggingface')}
+                  className={`flex-1 py-1 text-[11px] font-semibold rounded-lg transition flex items-center justify-center gap-1 ${
+                    importMode === 'huggingface' ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-amber-300'
+                  }`}
+                >
+                  <span role="img" aria-label="hf">🤗</span> Hugging Face
                 </button>
               </div>
 
@@ -1012,6 +1054,33 @@ export const TrainingView: React.FC<Props> = ({
                   </div>
                 </form>
               )}
+
+              {/* MODE 4: HUGGING FACE HUB EXPLORER */}
+              {importMode === 'huggingface' && (
+                <div className="pt-1">
+                  <HuggingFaceDatasetExplorer
+                    compact={true}
+                    onDatasetDownloaded={async (newDs) => {
+                      const all = await getAllDatasets();
+                      setDatasets(all);
+                      setSelectedDatasetId(newDs.id);
+                      setViewingDataset(newDs);
+                      setImportStatusMsg({
+                        type: 'success',
+                        text: `Downloaded "${newDs.name}" from Hugging Face with ${newDs.examples.length} instruction pairs!`,
+                      });
+                    }}
+                    onSelectForTraining={async (newDs) => {
+                      const all = await getAllDatasets();
+                      setDatasets(all);
+                      setSelectedDatasetId(newDs.id);
+                      setViewingDataset(newDs);
+                      setShowImportModal(false);
+                      setActiveSubTab('train');
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -1027,7 +1096,11 @@ export const TrainingView: React.FC<Props> = ({
                     : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <div className="text-xs font-bold truncate max-w-[170px]">{d.name}</div>
+                <div className="text-xs font-bold truncate max-w-[170px] flex items-center gap-1.5">
+                  {d.source === 'huggingface' && <span role="img" aria-label="hf">🤗</span>}
+                  {d.source === 'openrouter' && <span role="img" aria-label="openrouter">☁️</span>}
+                  <span className="truncate">{d.name}</span>
+                </div>
                 <div className="text-[10px] text-slate-500 mt-0.5">
                   {d.examples.length} instruction pairs · {d.category}
                 </div>
@@ -1040,7 +1113,29 @@ export const TrainingView: React.FC<Props> = ({
             <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-100">{viewingDataset.name}</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-slate-100">{viewingDataset.name}</h3>
+                    {viewingDataset.source === 'huggingface' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-500/40 text-amber-300 text-[10px] font-semibold">
+                        <span role="img" aria-label="hf">🤗</span> Hugging Face Hub
+                        {viewingDataset.hfDatasetId && (
+                          <a
+                            href={`https://huggingface.co/datasets/${viewingDataset.hfDatasetId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline ml-0.5 hover:text-white"
+                          >
+                            ({viewingDataset.hfDatasetId})
+                          </a>
+                        )}
+                      </span>
+                    )}
+                    {viewingDataset.source === 'openrouter' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 text-[10px] font-semibold">
+                        <Cloud className="w-3 h-3 text-indigo-400" /> OpenRouter Synthesized
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-400 mt-0.5">{viewingDataset.description}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -1181,6 +1276,29 @@ export const TrainingView: React.FC<Props> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* SUBTAB 2.5: HUGGING FACE DATASETS HUB */}
+      {/* ============================================================== */}
+      {activeSubTab === 'huggingface' && (
+        <div className="space-y-4 animate-in fade-in">
+          <HuggingFaceDatasetExplorer
+            onDatasetDownloaded={async (newDs) => {
+              const all = await getAllDatasets();
+              setDatasets(all);
+              setSelectedDatasetId(newDs.id);
+              setViewingDataset(newDs);
+            }}
+            onSelectForTraining={async (newDs) => {
+              const all = await getAllDatasets();
+              setDatasets(all);
+              setSelectedDatasetId(newDs.id);
+              setViewingDataset(newDs);
+              setActiveSubTab('train');
+            }}
+          />
         </div>
       )}
 

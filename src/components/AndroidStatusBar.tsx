@@ -24,7 +24,7 @@ export const AndroidStatusBar: React.FC<Props> = ({ activeModel, isGenerating, b
   }, []);
 
   return (
-    <div className="flex items-center justify-between px-5 pt-3 pb-2 text-xs font-medium text-slate-300 select-none bg-slate-950/80 backdrop-blur-md z-40 border-b border-slate-900/60">
+    <div className="shrink-0 flex items-center justify-between px-5 pt-3 pb-2 text-xs font-medium text-slate-300 select-none bg-slate-950/80 backdrop-blur-md z-40 border-b border-slate-900/60">
       {/* Time & Active LLM Pill */}
       <div className="flex items-center gap-2">
         <span className="font-semibold text-slate-200 tracking-tight text-[13px]">{time || '09:41'}</span>

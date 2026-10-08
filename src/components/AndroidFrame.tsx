@@ -62,7 +62,7 @@ export const AndroidFrame: React.FC<Props> = ({ children }) => {
         </div>
       ) : (
         // Native Edge-to-Edge Container
-        <div className="w-full h-full min-h-screen max-w-lg md:max-w-2xl mx-auto flex flex-col bg-slate-950 relative shadow-2xl md:border-x md:border-slate-800/80">
+        <div className="w-full h-screen h-[100dvh] max-h-[100dvh] max-w-lg md:max-w-2xl mx-auto flex flex-col bg-slate-950 relative shadow-2xl md:border-x md:border-slate-800/80 overflow-hidden">
           {children}
         </div>
       )}

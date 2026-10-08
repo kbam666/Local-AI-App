@@ -1,6 +1,6 @@
 {
   "name": "DroidLLM - Local GGUF Runner",
-  "description": "Android app for downloading, managing, and running quantized GGUF models directly on mobile devices with local on-device LLM inference.",
+  "description": "Android app for downloading, managing, and running quantized GGUF models on mobile devices, fine-tuning SLMs with Hugging Face datasets and OpenRouter LLMs.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

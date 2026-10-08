@@ -388,7 +388,7 @@ export const ChatView: React.FC<Props> = ({
   const contextPct = Math.min(100, Math.round((totalTokensEstimated / params.contextLength) * 100));
 
   return (
-    <div className="flex flex-col flex-1 h-full min-h-0 relative bg-slate-950">
+    <div className="flex flex-col flex-1 h-full min-h-0 relative bg-slate-950 overflow-hidden">
       {/* Slide-in Conversation History Menu Drawer */}
       <ConversationDrawer
         isOpen={showDrawer}
@@ -403,7 +403,7 @@ export const ChatView: React.FC<Props> = ({
       />
 
       {/* Top App Header with Conversation Drawer Menu Button & Model Switcher */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-900/60 backdrop-blur-md border-b border-slate-800/80 z-20">
+      <div className="shrink-0 flex items-center justify-between px-3 py-2 bg-slate-900/60 backdrop-blur-md border-b border-slate-800/80 z-20">
         <div className="flex items-center gap-2">
           {/* Conversation History Drawer Button */}
           <button
@@ -519,7 +519,7 @@ export const ChatView: React.FC<Props> = ({
       )}
 
       {/* Local Inference Verification Banner */}
-      <div className={`px-4 py-1.5 border-b flex items-center justify-between text-[10px] ${
+      <div className={`shrink-0 px-4 py-1.5 border-b flex items-center justify-between text-[10px] ${
         activeModel.isOpenRouter
           ? 'bg-indigo-950/40 border-indigo-500/30 text-indigo-300'
           : 'bg-emerald-950/30 border-emerald-500/20 text-emerald-300'
@@ -557,7 +557,7 @@ export const ChatView: React.FC<Props> = ({
       )}
 
       {/* Context Window Bar */}
-      <div className="px-4 py-1 bg-slate-900/40 border-b border-slate-800/50 flex items-center justify-between text-[10px] text-slate-400">
+      <div className="shrink-0 px-4 py-1 bg-slate-900/40 border-b border-slate-800/50 flex items-center justify-between text-[10px] text-slate-400">
         <div className="flex items-center gap-1.5 truncate mr-2">
           <Zap className="w-3 h-3 text-amber-400 shrink-0" />
           <span className="truncate">
@@ -879,7 +879,7 @@ export const ChatView: React.FC<Props> = ({
 
       {/* Floating Stop Button during inference */}
       {isGenerating && (
-        <div className="absolute bottom-16 left-0 right-0 flex justify-center pointer-events-none z-30">
+        <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none z-30">
           <button
             onClick={handleStop}
             className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full bg-red-600 hover:bg-red-500 text-white font-medium text-xs shadow-xl transition active:scale-95 animate-bounce"
@@ -890,8 +890,8 @@ export const ChatView: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Input Bar */}
-      <div className="p-3 bg-slate-900/90 backdrop-blur-md border-t border-slate-800">
+      {/* Input Bar - Sticky footer visible as messages scroll */}
+      <div className="sticky bottom-0 shrink-0 z-30 p-3 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 shadow-xl">
         <form
           onSubmit={(e) => {
             e.preventDefault();

@@ -20,7 +20,7 @@ export const AndroidNavBar: React.FC<Props> = ({ activeTab, onChangeTab, modelsC
   ];
 
   return (
-    <nav className="relative z-30 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/80 px-2 py-1.5 shadow-2xl">
+    <nav className="sticky bottom-0 shrink-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/80 px-2 py-1.5 shadow-2xl safe-area-pb">
       <div className="flex items-center justify-around max-w-lg mx-auto">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
