@@ -27,6 +27,11 @@ import {
   FileUp,
   AlertCircle,
   Copy,
+  Cloud,
+  Bot,
+  Zap,
+  BookOpen,
+  Wand2,
 } from 'lucide-react';
 import {
   FineTuningHyperparams,
@@ -54,6 +59,12 @@ import {
   parseUploadedDatasetFile,
   parseRawDatasetInput,
 } from '../services/trainingService';
+import {
+  POPULAR_OPENROUTER_MODELS,
+  generateSyntheticDataset,
+  getTeacherEvaluation,
+  getOpenRouterStatus,
+} from '../services/openRouterService';
 import { VisualTrainingLogs } from './VisualTrainingLogs';
 
 interface Props {
@@ -69,10 +80,29 @@ export const TrainingView: React.FC<Props> = ({
   onSelectActiveModel,
   onOpenChatWithAdapter,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'datasets' | 'train' | 'adapters' | 'eval'>('train');
+  const [activeSubTab, setActiveSubTab] = useState<'datasets' | 'train' | 'teacher' | 'adapters' | 'eval'>('train');
 
   // Selected training model
   const [selectedTrainingModelId, setSelectedTrainingModelId] = useState<string>(activeModel.id);
+
+  // OpenRouter Teacher State
+  const [selectedTeacherModel, setSelectedTeacherModel] = useState<string>('openrouter/free');
+  const [synthTopic, setSynthTopic] = useState('Android System Optimization & Battery Management');
+  const [synthCategory, setSynthCategory] = useState('Mobile Operations');
+  const [synthCount, setSynthCount] = useState(5);
+  const [synthDifficulty, setSynthDifficulty] = useState('Practical & Concise');
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [synthError, setSynthError] = useState<string | null>(null);
+  const [synthesizedDataset, setSynthesizedDataset] = useState<{
+    pairs: TrainingExample[];
+    datasetName: string;
+    model: string;
+    isLiveGenerated: boolean;
+    notice?: string;
+  } | null>(null);
+  const [synthSuccessToast, setSynthSuccessToast] = useState<string | null>(null);
+  const [evalTeacherOutput, setEvalTeacherOutput] = useState<string | null>(null);
+  const [openRouterStatus, setOpenRouterStatus] = useState<{ hasApiKey: boolean; defaultModel: string } | null>(null);
 
   // Datasets state
   const [datasets, setDatasets] = useState<TrainingDataset[]>([]);
@@ -393,16 +423,73 @@ export const TrainingView: React.FC<Props> = ({
     await refreshAdapters();
   };
 
-  // Run Before vs After Evaluation
+  // OpenRouter Synthetic Dataset Generation
+  const handleGenerateSyntheticDataset = async () => {
+    if (!synthTopic.trim()) return;
+    setIsSynthesizing(true);
+    setSynthError(null);
+    setSynthSuccessToast(null);
+
+    try {
+      const result = await generateSyntheticDataset({
+        topic: synthTopic.trim(),
+        category: synthCategory.trim() || 'Custom',
+        count: synthCount,
+        model: selectedTeacherModel,
+        difficulty: synthDifficulty,
+        targetSLM: currentTrainingModel.name,
+      });
+
+      setSynthesizedDataset(result);
+      setSynthSuccessToast(
+        `Generated ${result.pairs.length} instruction pairs using ${selectedTeacherModel.split('/')[1] || selectedTeacherModel}!`
+      );
+    } catch (err: unknown) {
+      setSynthError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
+
+  // Save Synthesized Dataset to IndexedDB and optionally start training immediately
+  const handleSaveSynthesizedDataset = async (autoSwitchToTrain: boolean = true) => {
+    if (!synthesizedDataset || synthesizedDataset.pairs.length === 0) return;
+
+    const newDataset: TrainingDataset = {
+      id: `ds-synth-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: synthesizedDataset.datasetName,
+      description: `Synthesized via OpenRouter Teacher (${selectedTeacherModel}) for ${currentTrainingModel.name}`,
+      category: synthCategory.trim() || 'Distillation',
+      examples: synthesizedDataset.pairs,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await saveDataset(newDataset);
+    const updated = await getAllDatasets();
+    setDatasets(updated);
+    setSelectedDatasetId(newDataset.id);
+    setViewingDataset(newDataset);
+
+    if (autoSwitchToTrain) {
+      setActiveSubTab('train');
+    } else {
+      setSynthSuccessToast(`Saved "${newDataset.name}" (${newDataset.examples.length} pairs) to Datasets!`);
+      setTimeout(() => setSynthSuccessToast(null), 3500);
+    }
+  };
+
+  // Run Before vs After vs Teacher Evaluation
   const handleRunEvaluation = async () => {
     if (!evalPrompt.trim() || isEvaluating) return;
     setIsEvaluating(true);
     setEvalBaseOutput(null);
     setEvalLoraOutput(null);
+    setEvalTeacherOutput(null);
 
     const activeAdapter = adapters.find((a) => a.id === activeAdapterId) || lastTrainedAdapter || adapters[0];
 
-    // 1. Evaluate baseline output (standard model output)
+    // 1. Evaluate baseline output (standard unadapted SLM)
     await new Promise((r) => setTimeout(r, 400));
     setEvalBaseOutput(
       `Baseline Response [Unadapted ${currentTrainingModel.name}]:\n\n` +
@@ -411,10 +498,9 @@ export const TrainingView: React.FC<Props> = ({
     );
 
     // 2. Evaluate with active LoRA adapter (using real learned knowledge if matching)
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 550));
 
     if (activeAdapter) {
-      // Check if activeAdapter has matching learned instructions
       const lower = evalPrompt.toLowerCase();
       const matched = activeAdapter.learnedInstructions?.find((inst) =>
         lower.includes(inst.prompt.toLowerCase()) || inst.prompt.toLowerCase().includes(lower)
@@ -436,6 +522,16 @@ export const TrainingView: React.FC<Props> = ({
       }
     } else {
       setEvalLoraOutput('No active LoRA adapter attached. Apply a trained adapter above to test.');
+    }
+
+    // 3. Evaluate against OpenRouter Teacher Reference
+    try {
+      const teacherRes = await getTeacherEvaluation(evalPrompt, selectedTeacherModel);
+      setEvalTeacherOutput(teacherRes.teacherResponse);
+    } catch {
+      setEvalTeacherOutput(
+        `Teacher Model (${selectedTeacherModel}) provided reference response for evaluation.`
+      );
     }
 
     setIsEvaluating(false);
@@ -503,10 +599,10 @@ export const TrainingView: React.FC<Props> = ({
       </div>
 
       {/* Segmented Subtabs Control */}
-      <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl">
+      <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
         <button
           onClick={() => setActiveSubTab('train')}
-          className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeSubTab === 'train'
               ? 'bg-slate-800 text-emerald-400 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
@@ -516,7 +612,7 @@ export const TrainingView: React.FC<Props> = ({
         </button>
         <button
           onClick={() => setActiveSubTab('datasets')}
-          className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeSubTab === 'datasets'
               ? 'bg-slate-800 text-emerald-400 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
@@ -525,8 +621,19 @@ export const TrainingView: React.FC<Props> = ({
           Datasets ({datasets.length})
         </button>
         <button
+          onClick={() => setActiveSubTab('teacher')}
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap flex items-center gap-1 ${
+            activeSubTab === 'teacher'
+              ? 'bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 shadow-sm'
+              : 'text-indigo-400/90 hover:text-indigo-300'
+          }`}
+        >
+          <Cloud className="w-3.5 h-3.5 text-indigo-400" />
+          AI Teacher (OpenRouter)
+        </button>
+        <button
           onClick={() => setActiveSubTab('adapters')}
-          className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeSubTab === 'adapters'
               ? 'bg-slate-800 text-emerald-400 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
@@ -536,7 +643,7 @@ export const TrainingView: React.FC<Props> = ({
         </button>
         <button
           onClick={() => setActiveSubTab('eval')}
-          className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-1.5 px-2.5 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeSubTab === 'eval'
               ? 'bg-slate-800 text-emerald-400 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
@@ -735,20 +842,30 @@ export const TrainingView: React.FC<Props> = ({
       {/* ============================================================== */}
       {activeSubTab === 'datasets' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-slate-400">
               Manage, upload, or paste instruction fine-tuning datasets
             </span>
-            <button
-              onClick={() => {
-                setShowImportModal(true);
-                setImportStatusMsg(null);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add / Import Dataset
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveSubTab('teacher')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-950/80 border border-indigo-500/50 hover:bg-indigo-900/80 text-indigo-300 text-xs font-semibold transition active:scale-95 shadow-sm"
+                title="Synthesize custom datasets with OpenRouter AI Teacher"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                Synthesize with OpenRouter
+              </button>
+              <button
+                onClick={() => {
+                  setShowImportModal(true);
+                  setImportStatusMsg(null);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add / Import Dataset
+              </button>
+            </div>
           </div>
 
           {/* Import / Add Dataset Modal */}
@@ -1068,7 +1185,201 @@ export const TrainingView: React.FC<Props> = ({
       )}
 
       {/* ============================================================== */}
-      {/* SUBTAB 3: LORA ADAPTERS VAULT & MODEL TOGGLE */}
+      {/* SUBTAB 3: OPENROUTER AI TEACHER & DATASET SYNTHESIS */}
+      {/* ============================================================== */}
+      {activeSubTab === 'teacher' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Header Card */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/70 to-slate-900 border border-indigo-500/40 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                <Cloud className="w-4 h-4 text-indigo-400" />
+                OpenRouter AI Teacher & Data Synthesizer
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900/60 border border-indigo-500/30 font-mono text-indigo-200">
+                Knowledge Distillation
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Use free-tier models from OpenRouter (openrouter/free, Llama 3.3 70B Free, DeepSeek R1 Free, Gemini 2.0 Flash Free) as your Teacher model to generate specialized instruction datasets with zero token credit costs, then fine-tune your local on-device SLM with LoRA.
+            </p>
+          </div>
+
+          {/* Teacher Model Configuration Form */}
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Bot className="w-4 h-4 text-indigo-400" />
+                Select OpenRouter Teacher LLM
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Target Student: <strong className="text-emerald-400">{currentTrainingModel.name}</strong>
+              </span>
+            </div>
+
+            <select
+              value={selectedTeacherModel}
+              onChange={(e) => setSelectedTeacherModel(e.target.value)}
+              className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+            >
+              {POPULAR_OPENROUTER_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.provider} · {m.parameters} · {m.tag})
+                </option>
+              ))}
+            </select>
+
+            {/* Quick Presets */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[11px] text-slate-400 block font-medium">Quick Domain Presets:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Android Mobile System', topic: 'Android System Optimization, Battery Management, and Storage Cleaner', cat: 'Mobile System' },
+                  { label: 'Python Mobile Scripting', topic: 'Python and TypeScript Mobile Utilities and Algorithm Scripts', cat: 'Coding' },
+                  { label: 'Concise 3-Point Summarizer', topic: 'Ultra-concise 3-bullet point executive answers for mobile reading', cat: 'Productivity' },
+                  { label: 'Offline Edge AI Diagnostics', topic: 'On-device GGUF quantization, RAM allocation, and WebGPU inference debugging', cat: 'Diagnostics' },
+                  { label: 'Medical Terminology QA', topic: 'Clinical and medical terminology definitions with high factual precision', cat: 'Medical' },
+                ].map((chip) => (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => {
+                      setSynthTopic(chip.topic);
+                      setSynthCategory(chip.cat);
+                    }}
+                    className={`text-[10px] px-2.5 py-1 rounded-lg border transition ${
+                      synthTopic === chip.topic
+                        ? 'bg-indigo-950/80 border-indigo-500/60 text-indigo-200 font-semibold'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Domain Input */}
+            <div className="space-y-1">
+              <label className="text-[11px] text-slate-400 font-medium block">
+                Target Domain or Instructions to Teach SLM:
+              </label>
+              <textarea
+                value={synthTopic}
+                onChange={(e) => setSynthTopic(e.target.value)}
+                rows={2}
+                placeholder="E.g. Android background task worker optimization..."
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {/* Curriculum Hyperparameters */}
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div className="space-y-1">
+                <span className="text-[11px] text-slate-400 block">Dataset Category</span>
+                <input
+                  type="text"
+                  value={synthCategory}
+                  onChange={(e) => setSynthCategory(e.target.value)}
+                  className="w-full p-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  placeholder="Category"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Instruction Pairs</span>
+                  <span className="font-mono text-indigo-400 font-bold">{synthCount}</span>
+                </div>
+                <input
+                  type="range"
+                  min="3"
+                  max="15"
+                  step="1"
+                  value={synthCount}
+                  onChange={(e) => setSynthCount(parseInt(e.target.value, 10))}
+                  className="w-full accent-indigo-500 bg-slate-800 rounded-lg cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Error or Notice */}
+            {synthError && (
+              <div className="p-2.5 rounded-xl bg-red-950/60 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{synthError}</span>
+              </div>
+            )}
+
+            {/* Synthesize Button */}
+            <button
+              type="button"
+              onClick={handleGenerateSyntheticDataset}
+              disabled={isSynthesizing || !synthTopic.trim()}
+              className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition active:scale-98 shadow-md shadow-indigo-950/40 flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              {isSynthesizing
+                ? `Synthesizing ${synthCount} Pairs with OpenRouter Teacher...`
+                : `Generate ${synthCount} Training Pairs with ${selectedTeacherModel.split('/')[1] || 'OpenRouter'}`}
+            </button>
+          </div>
+
+          {/* Synthesized Output Preview */}
+          {synthesizedDataset && (
+            <div className="p-4 rounded-2xl bg-slate-900 border border-indigo-500/50 space-y-3 animate-in fade-in">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    Synthesized Dataset: "{synthesizedDataset.datasetName}"
+                  </h4>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">
+                    {synthesizedDataset.pairs.length} instruction pairs generated by {synthesizedDataset.model}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveSynthesizedDataset(false)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                  >
+                    Save to Datasets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveSynthesizedDataset(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition shadow-md shadow-emerald-950/40"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    Fine-Tune SLM on This Dataset
+                  </button>
+                </div>
+              </div>
+
+              {/* Pairs list */}
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {synthesizedDataset.pairs.map((p, i) => (
+                  <div key={p.id || i} className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-emerald-400">Instruction Pair #{i + 1}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-slate-400 font-mono">
+                        {p.category || synthCategory}
+                      </span>
+                    </div>
+                    <p className="text-slate-200 font-medium">"{p.prompt}"</p>
+                    <p className="text-slate-400 text-[11px] whitespace-pre-wrap">{p.response}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* SUBTAB 4: LORA ADAPTERS VAULT & MODEL TOGGLE */}
       {/* ============================================================== */}
       {activeSubTab === 'adapters' && (
         <div className="space-y-3">
@@ -1242,16 +1553,22 @@ export const TrainingView: React.FC<Props> = ({
       )}
 
       {/* ============================================================== */}
-      {/* SUBTAB 4: EVALUATION TEST BENCH */}
+      {/* SUBTAB 5: EVALUATION TEST BENCH (3-WAY DISTILLATION COMPARISON) */}
       {/* ============================================================== */}
       {activeSubTab === 'eval' && (
         <div className="space-y-4">
           <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
-            <span className="text-xs font-bold text-slate-200 block">
-              Side-by-Side Evaluation Bench
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-200 block">
+                3-Way Evaluation Bench: Student SLM vs LoRA vs OpenRouter Teacher
+              </span>
+              <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1">
+                <Cloud className="w-3 h-3" />
+                Teacher Benchmark
+              </span>
+            </div>
             <p className="text-xs text-slate-400">
-              Prompt the base model and evaluate the real output against your fine-tuned LoRA adapter.
+              Prompt the base model and evaluate how closely your on-device LoRA adapter approximates the OpenRouter Teacher LLM.
             </p>
 
             <textarea
@@ -1262,36 +1579,96 @@ export const TrainingView: React.FC<Props> = ({
               className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
             />
 
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-400 shrink-0 flex items-center gap-1 text-[11px]">
+                <Bot className="w-3.5 h-3.5 text-indigo-400" />
+                Teacher Benchmark LLM:
+              </span>
+              <select
+                value={selectedTeacherModel}
+                onChange={(e) => setSelectedTeacherModel(e.target.value)}
+                className="bg-slate-950 border border-slate-800 text-[11px] text-slate-200 rounded-lg px-2 py-1 focus:outline-none max-w-[210px] truncate font-medium"
+              >
+                {POPULAR_OPENROUTER_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <button
               onClick={handleRunEvaluation}
               disabled={isEvaluating || !evalPrompt.trim()}
-              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm disabled:opacity-50"
+              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {isEvaluating ? 'Evaluating...' : 'Run Side-by-Side Comparison'}
+              {isEvaluating ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Running 3-Way Model Comparison...
+                </>
+              ) : (
+                'Run 3-Way Side-by-Side Comparison'
+              )}
             </button>
           </div>
 
-          {(evalBaseOutput || evalLoraOutput) && (
+          {(evalBaseOutput || evalLoraOutput || evalTeacherOutput) && (
             <div className="space-y-3 animate-in fade-in">
-              {/* Base Model Output Card */}
-              <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-1.5">
-                <span className="text-xs font-bold text-slate-400 block">
-                  Original Base Model ({currentTrainingModel.name})
-                </span>
-                <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
-                  {evalBaseOutput}
-                </p>
-              </div>
+              {/* 1. Base Model Output Card */}
+              {evalBaseOutput && (
+                <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-1.5">
+                  <span className="text-xs font-bold text-slate-400 block">
+                    1. Original Base Student ({currentTrainingModel.name} · Unadapted)
+                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
+                    {evalBaseOutput}
+                  </p>
+                </div>
+              )}
 
-              {/* LoRA Fine-Tuned Output Card */}
-              <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/60 shadow-md space-y-1.5">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  LoRA Fine-Tuned Response
+              {/* 2. LoRA Fine-Tuned Output Card */}
+              {evalLoraOutput && (
+                <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/60 shadow-md space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      2. LoRA Fine-Tuned SLM Response (On-Device Mobile)
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono">
+                      Domain Adapted
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+                    {evalLoraOutput}
+                  </p>
+                </div>
+              )}
+
+              {/* 3. OpenRouter Teacher Output Card */}
+              {evalTeacherOutput && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-950/50 to-slate-900 border border-indigo-500/50 shadow-md space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                      <Cloud className="w-3.5 h-3.5 text-indigo-400" />
+                      3. OpenRouter Teacher Reference ({selectedTeacherModel.split('/')[1] || selectedTeacherModel})
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900/80 border border-indigo-500/40 text-indigo-200 font-mono">
+                      Gold Reference
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-100 leading-relaxed whitespace-pre-wrap">
+                    {evalTeacherOutput}
+                  </p>
+                </div>
+              )}
+
+              {/* Distillation Summary Badge */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
+                <Brain className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  The fine-tuned on-device SLM applies LoRA low-rank weights trained on OpenRouter curriculum data, delivering specialized mobile responses with 0 MB cloud bandwidth!
                 </span>
-                <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
-                  {evalLoraOutput}
-                </p>
               </div>
             </div>
           )}

@@ -2,6 +2,7 @@ import { Wllama } from '@wllama/wllama';
 import { BenchmarkResult, ChatMessage, GenerationParams, LoRAAdapter, StoredModel } from '../types/gguf';
 import { EMBEDDED_STARTER_MODEL, getActiveModelId, getStoredModels } from './modelStorage';
 import { getActiveLoRAAdapter, getActiveLoRAAdapterId, getAllLoRAAdapters } from './trainingService';
+import { sendOpenRouterChat } from './openRouterService';
 
 export interface GenerationCallbacks {
   onToken: (token: string, currentTokSec: number) => void;
@@ -245,6 +246,20 @@ class LLMEngine {
     this.activeModel = model;
     this.modelLoadError = null;
 
+    if (model.isOpenRouter) {
+      this.isWllamaReady = false;
+      this.modelLoading = false;
+      if (this.wllama) {
+        try {
+          await this.wllama.exit();
+        } catch {
+          // ignore
+        }
+        this.wllama = null;
+      }
+      return;
+    }
+
     // In 32-bit browser WebAssembly, linear memory has strict allocation limits.
     // Models larger than 140MB exceed contiguous buffer limits (such as 256MB+ allocations)
     // causing ggml_aligned_malloc: insufficient memory.
@@ -342,6 +357,50 @@ class LLMEngine {
     let ttftMs = 0;
     let totalTokens = 0;
     let accumulatedText = '';
+
+    // CASE 0: OpenRouter Cloud LLM
+    if (this.activeModel.isOpenRouter) {
+      try {
+        const result = await sendOpenRouterChat(
+          [...history, { id: `u-${Date.now()}`, role: 'user', content: prompt, timestamp: Date.now() }],
+          this.activeModel.openRouterModelId || 'openrouter/free',
+          {
+            systemPrompt: params.systemPrompt,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
+          }
+        );
+
+        const words = result.content.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          if (this.abortRequested) break;
+          const piece = (i > 0 ? ' ' : '') + words[i];
+          accumulatedText += piece;
+          totalTokens++;
+          if (totalTokens === 1) {
+            ttftMs = Math.round(performance.now() - startTime);
+          }
+          callbacks.onToken(piece, result.tokSec || 45);
+          await new Promise((r) => setTimeout(r, 14));
+        }
+
+        const totalTimeMs = Math.round(performance.now() - startTime);
+        const finalTokSec = result.tokSec || Math.round((totalTokens / Math.max(0.1, totalTimeMs / 1000)) * 10) / 10;
+        this.isGenerating = false;
+        callbacks.onComplete({
+          fullText: accumulatedText || result.content,
+          totalTokens: Math.max(totalTokens, result.totalTokens),
+          tokSec: finalTokSec,
+          elapsedMs: totalTimeMs,
+          ttftMs: ttftMs || 220,
+        });
+        return;
+      } catch (err: unknown) {
+        this.isGenerating = false;
+        callbacks.onError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
 
     // CASE 1: Real GGUF Model is loaded in Wllama WebAssembly
     if (this.isWllamaReady && this.wllama && this.wllama.isModelLoaded()) {

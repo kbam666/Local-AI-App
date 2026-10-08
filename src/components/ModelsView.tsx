@@ -16,10 +16,13 @@ import {
   Zap,
   Globe,
   AlertCircle,
+  Cloud,
+  Bot,
 } from 'lucide-react';
 import { CatalogModel, HardwareAudit, StoredModel } from '../types/gguf';
 import { MOBILE_GGUF_CATALOG, importCustomGGUFFile, deleteModelFromStorage } from '../services/modelStorage';
 import { formatBytes } from '../services/ggufParser';
+import { POPULAR_OPENROUTER_MODELS, createStoredModelFromOpenRouter } from '../services/openRouterService';
 
 interface Props {
   storedModels: StoredModel[];
@@ -42,7 +45,7 @@ export const ModelsView: React.FC<Props> = ({
   onStartDownload,
   hardwareAudit,
 }) => {
-  const [activeTab, setActiveTab] = useState<'installed' | 'catalog'>('catalog');
+  const [activeTab, setActiveTab] = useState<'installed' | 'catalog' | 'openrouter'>('catalog');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('All');
   const [customUrl, setCustomUrl] = useState('');
@@ -193,11 +196,11 @@ export const ModelsView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Tabs: Download Catalog vs Installed Models */}
-      <div className="flex rounded-xl bg-slate-900 p-1 border border-slate-800">
+      {/* Tabs: Download Catalog vs Installed vs OpenRouter AI Cloud */}
+      <div className="flex rounded-xl bg-slate-900 p-1 border border-slate-800 overflow-x-auto">
         <button
           onClick={() => setActiveTab('catalog')}
-          className={`flex-1 py-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-2 px-3 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeTab === 'catalog'
               ? 'bg-emerald-500 text-slate-950 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
@@ -207,13 +210,24 @@ export const ModelsView: React.FC<Props> = ({
         </button>
         <button
           onClick={() => setActiveTab('installed')}
-          className={`flex-1 py-2 text-xs font-semibold rounded-lg transition ${
+          className={`py-2 px-3 text-xs font-semibold rounded-lg transition whitespace-nowrap ${
             activeTab === 'installed'
               ? 'bg-emerald-500 text-slate-950 shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          Installed Models ({storedModels.length})
+          Installed SLMs ({storedModels.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('openrouter')}
+          className={`py-2 px-3 text-xs font-semibold rounded-lg transition whitespace-nowrap flex items-center gap-1 ${
+            activeTab === 'openrouter'
+              ? 'bg-indigo-950/90 border border-indigo-500/50 text-indigo-300 shadow-sm'
+              : 'text-indigo-400/90 hover:text-indigo-300'
+          }`}
+        >
+          <Cloud className="w-3.5 h-3.5 text-indigo-400" />
+          OpenRouter Cloud ({POPULAR_OPENROUTER_MODELS.length})
         </button>
       </div>
 
@@ -485,6 +499,82 @@ export const ModelsView: React.FC<Props> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* TAB 3: OPENROUTER CLOUD LLMS */}
+      {activeTab === 'openrouter' && (
+        <div className="space-y-3">
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-950/60 to-slate-900 border border-indigo-500/40 text-xs space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                <Cloud className="w-4 h-4 text-indigo-400" />
+                OpenRouter Free Tier Models (Zero Cost)
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900/80 border border-indigo-500/40 text-indigo-200 font-mono">
+                openrouter/free & Free Models
+              </span>
+            </div>
+            <p className="text-slate-300 text-[11px] leading-relaxed">
+              Connect directly to models available on OpenRouter's free tier with zero token credit cost. Use them for cloud inference or as high-capacity Teacher models to generate fine-tuning datasets for your mobile SLMs.
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            {POPULAR_OPENROUTER_MODELS.map((m) => {
+              const isCurrent = activeModel.isOpenRouter && activeModel.openRouterModelId === m.id;
+              return (
+                <div
+                  key={m.id}
+                  className={`p-4 rounded-2xl border transition ${
+                    isCurrent
+                      ? 'bg-slate-900 border-indigo-500/70 shadow-lg shadow-indigo-950/30'
+                      : 'bg-slate-900/70 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-100">{m.name}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                          {m.tag}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                        {m.provider} • {m.parameters} • {(m.contextLength / 1000).toFixed(0)}k context
+                      </div>
+                    </div>
+
+                    <span className="text-xs font-mono font-bold text-indigo-400">
+                      Cloud Hosted
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-300 mt-2 leading-relaxed">{m.description}</p>
+
+                  <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400">
+                      {m.isRecommendedForTraining ? '✓ Optimal for SLM Distillation' : 'Cloud Chat Ready'}
+                    </span>
+
+                    <button
+                      onClick={() => {
+                        const stored = createStoredModelFromOpenRouter(m);
+                        onSelectActiveModel(stored);
+                      }}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 ${
+                        isCurrent
+                          ? 'bg-indigo-900/60 text-indigo-300 border border-indigo-500/50'
+                          : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                      }`}
+                    >
+                      {isCurrent ? 'Active Cloud Model' : 'Select for Chat'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

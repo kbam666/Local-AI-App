@@ -70,6 +70,8 @@ export interface StoredModel {
   dateAdded: number;
   isCustomUpload?: boolean;
   isEmbedded?: boolean;
+  isOpenRouter?: boolean;
+  openRouterModelId?: string;
   parseResult?: GGUFParseResult;
   blob?: Blob;
   downloadUrl?: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Sliders,
@@ -9,9 +9,11 @@ import {
   Cpu,
   RefreshCw,
   Info,
+  Cloud,
 } from 'lucide-react';
 import { GenerationParams, HardwareAudit } from '../types/gguf';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { getOpenRouterStatus } from '../services/openRouterService';
 
 interface Props {
   params: GenerationParams;
@@ -37,6 +39,15 @@ const SYSTEM_PROMPT_PRESETS = [
 export const SettingsView: React.FC<Props> = ({ params, onChangeParams, hardwareAudit }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [installSuccess, setInstallSuccess] = useState(false);
+  const [openRouterStatus, setOpenRouterStatus] = useState<{ hasApiKey: boolean; defaultModel: string } | null>(null);
+
+  useEffect(() => {
+    async function loadStatus() {
+      const status = await getOpenRouterStatus();
+      setOpenRouterStatus(status);
+    }
+    loadStatus();
+  }, []);
 
   const handleInstallClick = async () => {
     const success = await install();
@@ -212,6 +223,52 @@ export const SettingsView: React.FC<Props> = ({ params, onChangeParams, hardware
           onChange={(e) => onChangeParams({ ...params, systemPrompt: e.target.value })}
           className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono"
         />
+      </div>
+
+      {/* OpenRouter AI Integration Card */}
+      <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-slate-900 border border-indigo-500/30 shadow-md space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                OpenRouter AI Cloud Integration
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Frontier LLMs for chat & synthetic SLM dataset distillation
+              </p>
+            </div>
+          </div>
+
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold border ${
+            openRouterStatus?.hasApiKey
+              ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+              : 'bg-indigo-950/80 border-indigo-500/40 text-indigo-300'
+          }`}>
+            {openRouterStatus?.hasApiKey ? 'API Key Active' : 'Ready / Sandboxed'}
+          </span>
+        </div>
+
+        <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+          <div className="flex justify-between text-[11px]">
+            <span className="text-slate-400">Default Model / Teacher:</span>
+            <span className="font-mono text-indigo-300">openrouter/free (Auto Free Tier)</span>
+          </div>
+          <div className="flex justify-between text-[11px]">
+            <span className="text-slate-400">Model Registry:</span>
+            <span className="text-slate-200">Exclusively Free Tier (Llama 3.3 70B, DeepSeek R1...)</span>
+          </div>
+          <div className="flex justify-between text-[11px]">
+            <span className="text-slate-400">Security Architecture:</span>
+            <span className="text-emerald-400">Zero-leak server proxy (/api/openrouter/*)</span>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          To enable live cloud LLM inference and unlimited synthetic data generation, add <code className="text-indigo-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">OPENROUTER_API_KEY</code> to your environment variables or Secrets panel.
+        </p>
       </div>
     </div>
   );
